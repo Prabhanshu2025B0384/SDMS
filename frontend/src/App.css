@@ -1,0 +1,122 @@
+/* Base Components */
+
+/* Button */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 16px;
+  min-height: 48px;
+  font-size: 0.9375rem;
+  font-weight: 700;
+  border-radius: var(--radius-sm);
+  border: none;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  line-height: 1.71429;
+}
+
+.btn-primary {
+  background-color: var(--text-primary);
+  color: white;
+  box-shadow: 0 8px 16px 0 rgba(33, 43, 54, 0.24);
+}
+
+.btn-primary:hover {
+  background-color: #454F5B;
+  box-shadow: none;
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Input */
+.input-group {
+  margin-bottom: 1.5rem;
+  position: relative;
+}
+
+.input-field {
+  width: 100%;
+  padding: 16.5px 14px;
+  font-size: 1rem;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  transition: border-color 0.2s, box-shadow 0.2s;
+  background-color: transparent;
+  color: var(--text-primary);
+  font-family: inherit;
+}
+
+.input-field:focus {
+  outline: none;
+  border-color: var(--text-primary);
+  box-shadow: 0 0 0 1px var(--text-primary);
+}
+
+.input-field::placeholder {
+  color: var(--text-disabled);
+}
+
+/* Card */
+.card {
+  background-color: var(--bg-surface);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  padding: 3rem;
+  transition: box-shadow 0.3s ease;
+}
+
+/* Spinner */
+.spinner {
+  width: 24px;
+  height: 24px;
+  border: 3px solid rgba(255,255,255,0.3);
+  border-top-color: white;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Auth Layout */
+.auth-layout {
+  display: flex;
+  min-height: 100vh;
+}
+
+.auth-left {
+  display: none;
+  width: 480px;
+  background-color: var(--bg-surface);
+  box-shadow: var(--shadow-md);
+  padding: 3rem;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+}
+
+@media (min-width: 900px) {
+  .auth-left {
+    display: flex;
+  }
+}
+
+.auth-right {
+  flex: 1;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 2rem;
+}
+
+.auth-form-container {
+  width: 100%;
+  max-width: 480px;
+}
