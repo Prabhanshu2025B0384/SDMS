@@ -10,9 +10,9 @@ from app.core.security import get_current_user
 
 router = APIRouter(prefix="/search", tags=["Search"])
 
-@router.get("/")
+@router.get("/documents")
 async def search_documents(
-    q: str = Query(..., min_length=3),
+    query: str = Query(..., min_length=3),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -21,11 +21,11 @@ async def search_documents(
     """
     # Simple direct string query against the tsvector column using SQLAlchemy raw text
     # In production, we'd parameterize safely to avoid SQL injection, but websearch_to_tsquery is safe.
-    query = select(Document).where(
-        text("search_vector @@ websearch_to_tsquery('english', :q)")
-    ).params(q=q)
+    query_stmt = select(Document).where(
+        text("search_vector @@ websearch_to_tsquery('english', :query)")
+    ).params(query=query)
     
-    result = await db.execute(query)
+    result = await db.execute(query_stmt)
     documents = result.scalars().all()
     
     return documents

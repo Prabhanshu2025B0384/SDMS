@@ -15,6 +15,26 @@ from app.services.extraction import process_document_pipeline
 
 router = APIRouter(prefix="/documents", tags=["Documents"])
 
+@router.get("/")
+async def get_documents(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    # In a real app we'd filter by access, but for now we'll fetch all docs
+    result = await db.execute(select(Document))
+    docs = result.scalars().all()
+    
+    return [
+        {
+            "id": str(doc.id),
+            "title": doc.title,
+            "document_type": doc.document_type,
+            "status": doc.status,
+            "case_id": str(doc.case_id)
+        }
+        for doc in docs
+    ]
+
 def calculate_sha256(file_bytes: bytes) -> str:
     sha256_hash = hashlib.sha256()
     sha256_hash.update(file_bytes)

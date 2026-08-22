@@ -1,15 +1,15 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { 
   Box, 
   Card, 
+  Typography, 
+  Button, 
   Table, 
-  TableRow, 
   TableBody, 
   TableCell, 
   TableContainer, 
   TableHead, 
-  Typography, 
-  Button,
+  TableRow,
   Chip,
   IconButton,
   Dialog,
@@ -17,47 +17,79 @@ import {
   DialogContent,
   DialogActions,
   TextField,
-  MenuItem
+  CircularProgress
 } from '@mui/material';
 import { AddRounded, MoreVertRounded, CloudUploadRounded } from '@mui/icons-material';
-import axios from 'axios';
-
-// Placeholder data since we don't have the API fully hooked up for fetching all cases/docs on the frontend yet
-const MOCK_DOCS = [
-  { id: '1', title: 'FIR Report - Case 101', type: 'FIR', status: 'READY', date: '2026-08-22' },
-  { id: '2', title: 'Witness Statement - Case 102', type: 'STATEMENT', status: 'PROCESSING', date: '2026-08-23' },
-];
+import { useAuth } from '../context/AuthContext';
 
 export default function Documents() {
-  const [openUpload, setOpenUpload] = useState(false);
+  const [open, setOpen] = useState(false);
   const [file, setFile] = useState<File | null>(null);
+  const [caseId, setCaseId] = useState('');
+  const [title, setTitle] = useState('');
+  const [docType, setDocType] = useState('FIR');
+  const [documents, setDocuments] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const { token } = useAuth();
+
+  const fetchDocuments = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch('http://127.0.0.1:8000/documents', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.ok) setDocuments(await res.json());
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchDocuments();
+  }, []);
 
   const handleUpload = async () => {
-    // Note: The actual API call is commented out because it requires valid auth tokens & case_ids
-    /*
-    const formData = new FormData();
-    if (file) formData.append('file', file);
-    
-    await axios.post('http://localhost:8000/documents/upload?case_id=UUID...', formData, {
-      headers: {
-        'Content-Type': 'multipart/form-data',
-        'Authorization': 'Bearer ...'
+    if (!file || !caseId || !title || !docType) return;
+    setUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('case_id', caseId);
+      formData.append('title', title);
+      formData.append('document_type', docType);
+
+      const res = await fetch('http://127.0.0.1:8000/documents/upload', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` },
+        body: formData
+      });
+
+      if (res.ok) {
+        setOpen(false);
+        setFile(null);
+        fetchDocuments();
+      } else {
+        alert("Upload failed. Ensure case ID is valid.");
       }
-    });
-    */
-    setOpenUpload(false);
+    } catch (e) {
+      alert("Error uploading file.");
+    } finally {
+      setUploading(false);
+    }
   };
 
   return (
     <Box>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 5 }}>
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 5 }}>
         <Typography variant="h4">Documents</Typography>
         <Button 
           variant="contained" 
           startIcon={<AddRounded />}
-          onClick={() => setOpenUpload(true)}
+          onClick={() => setOpen(true)}
+          sx={{ boxShadow: '0 8px 16px 0 rgba(0, 167, 111, 0.24)' }}
         >
-          Upload Document
+          New Document
         </Button>
       </Box>
 
@@ -68,70 +100,66 @@ export default function Documents() {
               <TableRow>
                 <TableCell>Title</TableCell>
                 <TableCell>Type</TableCell>
-                <TableCell>Date</TableCell>
+                <TableCell>Case ID</TableCell>
                 <TableCell>Status</TableCell>
-                <TableCell align="right">Actions</TableCell>
+                <TableCell align="right"></TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
-              {MOCK_DOCS.map((doc) => (
+              {loading ? (
+                <TableRow><TableCell colSpan={5} align="center"><CircularProgress size={24} /></TableCell></TableRow>
+              ) : documents.map((doc) => (
                 <TableRow key={doc.id} hover>
-                  <TableCell>
-                    <Typography variant="subtitle2">{doc.title}</Typography>
-                  </TableCell>
-                  <TableCell>{doc.type}</TableCell>
-                  <TableCell>{doc.date}</TableCell>
+                  <TableCell sx={{ fontWeight: 600 }}>{doc.title}</TableCell>
+                  <TableCell>{doc.document_type}</TableCell>
+                  <TableCell sx={{ color: 'text.secondary', fontFamily: 'monospace' }}>{doc.case_id}</TableCell>
                   <TableCell>
                     <Chip 
                       label={doc.status} 
                       size="small" 
-                      color={doc.status === 'READY' ? 'success' : 'warning'} 
-                      sx={{ borderRadius: 1 }}
+                      color={doc.status === 'COMPLETED' ? 'success' : 'warning'} 
+                      sx={{ fontWeight: 700 }}
                     />
                   </TableCell>
                   <TableCell align="right">
-                    <IconButton size="small">
-                      <MoreVertRounded />
-                    </IconButton>
+                    <IconButton><MoreVertRounded /></IconButton>
                   </TableCell>
                 </TableRow>
               ))}
+              {!loading && documents.length === 0 && (
+                <TableRow><TableCell colSpan={5} align="center">No documents uploaded yet.</TableCell></TableRow>
+              )}
             </TableBody>
           </Table>
         </TableContainer>
       </Card>
 
-      <Dialog open={openUpload} onClose={() => setOpenUpload(false)} maxWidth="sm" fullWidth>
+      <Dialog open={open} onClose={() => !uploading && setOpen(false)} maxWidth="sm" fullWidth>
         <DialogTitle>Upload New Document</DialogTitle>
-        <DialogContent>
-          <Box sx={{ pt: 2, display: 'flex', flexDirection: 'column', gap: 3 }}>
-            <TextField label="Document Title" fullWidth />
-            <TextField select label="Document Type" fullWidth defaultValue="FIR">
-              <MenuItem value="FIR">FIR</MenuItem>
-              <MenuItem value="STATEMENT">Witness Statement</MenuItem>
-              <MenuItem value="EVIDENCE">Evidence Photo</MenuItem>
-            </TextField>
+        <DialogContent dividers>
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3, pt: 1 }}>
             <Box 
               sx={{ 
-                border: '1px dashed', 
-                borderColor: 'divider', 
-                borderRadius: 2, 
-                p: 5, 
+                border: '2px dashed', 
+                borderColor: 'divider',
+                borderRadius: 2,
+                p: 5,
                 textAlign: 'center',
                 bgcolor: 'background.default',
-                cursor: 'pointer',
-                '&:hover': { opacity: 0.72 }
+                cursor: 'pointer'
               }}
+              onClick={() => document.getElementById('file-upload')?.click()}
             >
-              <CloudUploadRounded color="primary" sx={{ fontSize: 48, mb: 2 }} />
-              <Typography variant="h6">Select File</Typography>
-              <Typography variant="body2" color="text.secondary">Drop files here or click to browse</Typography>
               <input 
                 type="file" 
-                style={{ opacity: 0, position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', cursor: 'pointer' }}
-                onChange={(e) => e.target.files && setFile(e.target.files[0])}
+                id="file-upload" 
+                hidden 
+                accept="application/pdf"
+                onChange={(e) => setFile(e.target.files?.[0] || null)}
               />
-              {file && <Typography sx={{ mt: 2 }} color="primary">{file.name}</Typography>}
+              <CloudUploadRounded sx={{ fontSize: 48, color: 'text.disabled', mb: 2 }} />
+              <Typography variant="h6">{file ? file.name : "Select or drag file"}</Typography>
+              <Typography variant="body2" color="text.secondary">Support for a single PDF file.</Typography>
             </Box>
           </Box>
         </DialogContent>

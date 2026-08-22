@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { 
   Box, 
   Card, 
@@ -7,20 +7,40 @@ import {
   TextField,
   List,
   ListItem,
-  ListItemText,
   Divider,
-  Button
+  Button,
+  CircularProgress
 } from '@mui/material';
 import { SearchRounded, DescriptionRounded } from '@mui/icons-material';
+import { useAuth } from '../context/AuthContext';
 
 export default function Search() {
   const [query, setQuery] = useState('');
+  const [results, setResults] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+  const { token } = useAuth();
 
-  // Placeholder for search results
-  const results = query.length > 2 ? [
-    { id: '1', title: 'FIR Report - Case 101', snippet: '...the accused was found in possession of the stolen goods near the station...' },
-    { id: '2', title: 'Witness Statement - Case 101', snippet: '...I saw the incident happen at approximately 9:00 PM on the 14th...' }
-  ] : [];
+  useEffect(() => {
+    const delayDebounceFn = setTimeout(async () => {
+      if (query.length > 2) {
+        setLoading(true);
+        try {
+          const res = await fetch(`http://127.0.0.1:8000/search/documents?query=${query}`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+          });
+          if (res.ok) {
+            setResults(await res.json());
+          }
+        } finally {
+          setLoading(false);
+        }
+      } else {
+        setResults([]);
+      }
+    }, 500); // Debounce search 500ms
+
+    return () => clearTimeout(delayDebounceFn);
+  }, [query, token]);
 
   return (
     <Box sx={{ maxWidth: 800, mx: 'auto' }}>
@@ -45,6 +65,7 @@ export default function Search() {
               <SearchRounded color="action" />
             </InputAdornment>
           ),
+          endAdornment: loading ? <CircularProgress size={20} color="inherit" /> : null
         }}
       />
 
@@ -61,10 +82,10 @@ export default function Search() {
                   <ListItem sx={{ p: 3, flexDirection: 'column', alignItems: 'flex-start' }}>
                     <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
                       <DescriptionRounded color="primary" sx={{ mr: 1, fontSize: 20 }} />
-                      <Typography variant="subtitle1">{result.title}</Typography>
+                      <Typography variant="subtitle1">{result.title} (Case: {result.case_id})</Typography>
                     </Box>
                     <Typography variant="body2" color="text.secondary" sx={{ pl: 3.5, fontStyle: 'italic' }}>
-                      "{result.snippet}"
+                      Status: {result.status}
                     </Typography>
                     <Box sx={{ pl: 3.5, mt: 1.5 }}>
                       <Button size="small" variant="outlined" sx={{ borderRadius: 1 }}>View Document</Button>
@@ -75,6 +96,9 @@ export default function Search() {
               ))}
             </List>
           </Card>
+        )}
+        {query.length > 2 && results.length === 0 && !loading && (
+          <Typography color="text.secondary" align="center">No documents found matching "{query}"</Typography>
         )}
       </Box>
     </Box>

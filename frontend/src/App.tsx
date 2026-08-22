@@ -1,6 +1,10 @@
 import { Routes, Route, Link, useLocation } from 'react-router-dom';
 import Documents from './pages/Documents';
 import Search from './pages/Search';
+import AdminDashboard from './pages/AdminDashboard';
+import Login from './pages/Login';
+import { AuthProvider, useAuth } from './context/AuthContext';
+import ProtectedRoute from './components/ProtectedRoute';
 import { 
   Box, 
   Drawer, 
@@ -16,24 +20,33 @@ import {
   Avatar,
   Card,
   CardContent,
-  Grid
+  Grid,
+  Button
 } from '@mui/material';
 import {
   DashboardRounded,
   FolderRounded,
   SearchRounded,
-  NotificationsRounded
+  NotificationsRounded,
+  AdminPanelSettingsRounded,
+  LogoutRounded
 } from '@mui/icons-material';
 
 const DRAWER_WIDTH = 280;
 
 function Sidebar() {
   const location = useLocation();
+  const { user, logout } = useAuth();
+  
   const menuItems = [
     { title: 'Dashboard', path: '/', icon: <DashboardRounded /> },
     { title: 'Documents', path: '/documents', icon: <FolderRounded /> },
     { title: 'Search', path: '/search', icon: <SearchRounded /> },
   ];
+
+  if (user?.role === 'Admin') {
+    menuItems.push({ title: 'Admin Panel', path: '/admin', icon: <AdminPanelSettingsRounded /> });
+  }
 
   return (
     <Box sx={{ width: DRAWER_WIDTH, flexShrink: 0 }}>
@@ -63,13 +76,15 @@ function Sidebar() {
           <Box sx={{ p: 2, borderRadius: 2, bgcolor: 'rgba(145, 158, 171, 0.12)', display: 'flex', alignItems: 'center', mb: 3 }}>
             <Avatar sx={{ width: 40, height: 40, mr: 2 }} />
             <Box>
-              <Typography variant="subtitle2">John Doe</Typography>
-              <Typography variant="body2" color="text.secondary">Investigating Officer</Typography>
+              <Typography variant="subtitle2" sx={{ overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 140 }}>
+                {user?.email.split('@')[0]}
+              </Typography>
+              <Typography variant="body2" color="text.secondary">{user?.role}</Typography>
             </Box>
           </Box>
         </Box>
 
-        <List sx={{ px: 2 }}>
+        <List sx={{ px: 2, flexGrow: 1 }}>
           {menuItems.map((item) => {
             const active = location.pathname === item.path;
             return (
@@ -98,6 +113,17 @@ function Sidebar() {
             );
           })}
         </List>
+
+        <Box sx={{ p: 2 }}>
+          <Button 
+            fullWidth 
+            color="error" 
+            startIcon={<LogoutRounded />} 
+            onClick={logout}
+          >
+            Logout
+          </Button>
+        </Box>
       </Drawer>
     </Box>
   );
@@ -120,51 +146,72 @@ function Topbar() {
 }
 
 // Pages
-const Dashboard = () => (
-  <Box>
-    <Typography variant="h4" sx={{ mb: 5 }}>Hi, Welcome back 👋</Typography>
-    <Grid container spacing={3}>
-      <Grid item xs={12} md={4}>
-        <Card sx={{ bgcolor: 'primary.lighter', color: 'primary.darker' }}>
-          <CardContent>
-            <Typography variant="h3">24</Typography>
-            <Typography variant="subtitle2" sx={{ opacity: 0.72 }}>Active Cases</Typography>
-          </CardContent>
-        </Card>
+const Dashboard = () => {
+  const { user } = useAuth();
+  return (
+    <Box>
+      <Typography variant="h4" sx={{ mb: 5 }}>Hi, Welcome back {user?.full_name || user?.email.split('@')[0]} 👋</Typography>
+      <Grid container spacing={3}>
+        <Grid item xs={12} md={4}>
+          <Card sx={{ bgcolor: 'primary.lighter', color: 'primary.darker' }}>
+            <CardContent>
+              <Typography variant="h3">24</Typography>
+              <Typography variant="subtitle2" sx={{ opacity: 0.72 }}>Active Cases</Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+        <Grid item xs={12} md={4}>
+          <Card sx={{ bgcolor: '#FFF7CD', color: '#7A4F01' }}>
+            <CardContent>
+              <Typography variant="h3">135</Typography>
+              <Typography variant="subtitle2" sx={{ opacity: 0.72 }}>Total Documents</Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+        <Grid item xs={12} md={4}>
+          <Card sx={{ bgcolor: '#FFE7D9', color: '#7A0C2E' }}>
+            <CardContent>
+              <Typography variant="h3">5</Typography>
+              <Typography variant="subtitle2" sx={{ opacity: 0.72 }}>Pending Approvals</Typography>
+            </CardContent>
+          </Card>
+        </Grid>
       </Grid>
-      <Grid item xs={12} md={4}>
-        <Card sx={{ bgcolor: '#FFF7CD', color: '#7A4F01' }}>
-          <CardContent>
-            <Typography variant="h3">135</Typography>
-            <Typography variant="subtitle2" sx={{ opacity: 0.72 }}>Total Documents</Typography>
-          </CardContent>
-        </Card>
-      </Grid>
-      <Grid item xs={12} md={4}>
-        <Card sx={{ bgcolor: '#FFE7D9', color: '#7A0C2E' }}>
-          <CardContent>
-            <Typography variant="h3">5</Typography>
-            <Typography variant="subtitle2" sx={{ opacity: 0.72 }}>Pending Approvals</Typography>
-          </CardContent>
-        </Card>
-      </Grid>
-    </Grid>
-  </Box>
-);
+    </Box>
+  );
+};
 
-function App() {
+
+function AuthenticatedLayout() {
   return (
     <Box sx={{ display: 'flex', minHeight: '100vh' }}>
       <Sidebar />
       <Topbar />
       <Box component="main" sx={{ flexGrow: 1, p: 3, pt: 12, bgcolor: '#ffffff' }}>
         <Routes>
-          <Route path="/" element={<Dashboard />} />
-          <Route path="/documents" element={<Documents />} />
-          <Route path="/search" element={<Search />} />
+          <Route element={<ProtectedRoute />}>
+            <Route path="/" element={<Dashboard />} />
+            <Route path="/documents" element={<Documents />} />
+            <Route path="/search" element={<Search />} />
+          </Route>
+          
+          <Route element={<ProtectedRoute requiredRole="Admin" />}>
+            <Route path="/admin" element={<AdminDashboard />} />
+          </Route>
         </Routes>
       </Box>
     </Box>
+  );
+}
+
+function App() {
+  return (
+    <AuthProvider>
+      <Routes>
+        <Route path="/login" element={<Login />} />
+        <Route path="/*" element={<AuthenticatedLayout />} />
+      </Routes>
+    </AuthProvider>
   );
 }
 
