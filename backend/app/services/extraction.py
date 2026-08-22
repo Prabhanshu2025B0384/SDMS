@@ -1,9 +1,12 @@
 import json
-import requests
-from typing import Dict, Any
-from pdf2image import convert_from_path
+from typing import Any
+
 import pytesseract
+import requests
+from pdf2image import convert_from_path
+
 from app.core.config import settings
+
 
 def extract_text_from_pdf(pdf_path: str) -> str:
     """
@@ -16,7 +19,7 @@ def extract_text_from_pdf(pdf_path: str) -> str:
         full_text += text + "\n"
     return full_text
 
-def extract_structured_data_with_ollama(raw_text: str) -> Dict[str, Any]:
+def extract_structured_data_with_ollama(raw_text: str) -> dict[str, Any]:
     """
     Sends raw OCR text to a local Ollama model to extract structured data as JSON.
     """
@@ -56,7 +59,7 @@ def extract_structured_data_with_ollama(raw_text: str) -> Dict[str, Any]:
         print(f"Error during Ollama extraction: {e}")
         return {}
 
-def process_document_pipeline(pdf_path: str) -> Dict[str, Any]:
+def process_document_pipeline(pdf_path: str) -> dict[str, Any]:
     """
     Full pipeline: PDF -> Text (OCR) -> Structured Data (Ollama)
     """

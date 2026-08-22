@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-import os
+
+from app.api import auth, documents, search, cases
 
 app = FastAPI(
     title="Secure DMS (Zero Cost)",
@@ -16,6 +17,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(auth.router)
+app.include_router(documents.router)
+app.include_router(search.router)
+app.include_router(cases.router)
 
 @app.get("/")
 async def root():

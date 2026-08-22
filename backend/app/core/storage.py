@@ -1,6 +1,8 @@
 import boto3
 from botocore.client import Config
+
 from app.core.config import settings
+
 
 def get_storage_client():
     """

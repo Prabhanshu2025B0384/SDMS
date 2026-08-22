@@ -1,9 +1,12 @@
 import uuid
 from datetime import datetime
-from sqlalchemy import Column, String, DateTime, ForeignKey, Text, JSON, Boolean, Index
-from sqlalchemy.dialects.postgresql import UUID, TSVECTOR
+
+from sqlalchemy import JSON, Boolean, Column, DateTime, ForeignKey, Index, String, Text
+from sqlalchemy.dialects.postgresql import TSVECTOR, UUID
 from sqlalchemy.orm import relationship
+
 from app.database import Base
+
 
 class User(Base):
     __tablename__ = "users"

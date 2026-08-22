@@ -1,7 +1,8 @@
+
 from fastapi import Depends, HTTPException, status
-from typing import List, Optional
-from app.models import User
+
 from app.core.security import get_current_user
+from app.models import User
 
 # Simple RBAC model mapping roles to permissions
 ROLE_PERMISSIONS = {
@@ -12,7 +13,7 @@ ROLE_PERMISSIONS = {
 }
 
 class RoleChecker:
-    def __init__(self, required_permissions: List[str]):
+    def __init__(self, required_permissions: list[str]):
         self.required_permissions = required_permissions
 
     def __call__(self, user: User = Depends(get_current_user)):

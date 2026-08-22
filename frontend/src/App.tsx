@@ -1,122 +1,171 @@
-import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from './assets/vite.svg'
-import heroImg from './assets/hero.png'
-import './App.css'
+import { Routes, Route, Link, useLocation } from 'react-router-dom';
+import Documents from './pages/Documents';
+import Search from './pages/Search';
+import { 
+  Box, 
+  Drawer, 
+  List, 
+  ListItem, 
+  ListItemButton, 
+  ListItemIcon, 
+  ListItemText, 
+  Typography,
+  AppBar,
+  Toolbar,
+  IconButton,
+  Avatar,
+  Card,
+  CardContent,
+  Grid
+} from '@mui/material';
+import {
+  DashboardRounded,
+  FolderRounded,
+  SearchRounded,
+  NotificationsRounded
+} from '@mui/icons-material';
 
-function App() {
-  const [count, setCount] = useState(0)
+const DRAWER_WIDTH = 280;
+
+function Sidebar() {
+  const location = useLocation();
+  const menuItems = [
+    { title: 'Dashboard', path: '/', icon: <DashboardRounded /> },
+    { title: 'Documents', path: '/documents', icon: <FolderRounded /> },
+    { title: 'Search', path: '/search', icon: <SearchRounded /> },
+  ];
 
   return (
-    <>
-      <section id="center">
-        <div className="hero">
-          <img src={heroImg} className="base" width="170" height="179" alt="" />
-          <img src={reactLogo} className="framework" alt="React logo" />
-          <img src={viteLogo} className="vite" alt="Vite logo" />
-        </div>
-        <div>
-          <h1>Get started</h1>
-          <p>
-            Edit <code>src/App.tsx</code> and save to test <code>HMR</code>
-          </p>
-        </div>
-        <button
-          type="button"
-          className="counter"
-          onClick={() => setCount((count) => count + 1)}
-        >
-          Count is {count}
-        </button>
-      </section>
+    <Box sx={{ width: DRAWER_WIDTH, flexShrink: 0 }}>
+      <Drawer
+        variant="permanent"
+        sx={{
+          '& .MuiDrawer-paper': {
+            width: DRAWER_WIDTH,
+            boxSizing: 'border-box',
+            borderRight: '1px dashed rgba(145, 158, 171, 0.24)',
+            backgroundColor: 'background.default',
+          },
+        }}
+      >
+        <Box sx={{ p: 3, display: 'flex', alignItems: 'center' }}>
+          <Box
+            component="img"
+            src="/vite.svg"
+            sx={{ width: 40, height: 40, mr: 2 }}
+          />
+          <Typography variant="h6" fontWeight="700" color="primary.main">
+            Secure DMS
+          </Typography>
+        </Box>
+        
+        <Box sx={{ px: 2, pb: 2 }}>
+          <Box sx={{ p: 2, borderRadius: 2, bgcolor: 'rgba(145, 158, 171, 0.12)', display: 'flex', alignItems: 'center', mb: 3 }}>
+            <Avatar sx={{ width: 40, height: 40, mr: 2 }} />
+            <Box>
+              <Typography variant="subtitle2">John Doe</Typography>
+              <Typography variant="body2" color="text.secondary">Investigating Officer</Typography>
+            </Box>
+          </Box>
+        </Box>
 
-      <div className="ticks"></div>
-
-      <section id="next-steps">
-        <div id="docs">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#documentation-icon"></use>
-          </svg>
-          <h2>Documentation</h2>
-          <p>Your questions, answered</p>
-          <ul>
-            <li>
-              <a href="https://vite.dev/" target="_blank">
-                <img className="logo" src={viteLogo} alt="" />
-                Explore Vite
-              </a>
-            </li>
-            <li>
-              <a href="https://react.dev/" target="_blank">
-                <img className="button-icon" src={reactLogo} alt="" />
-                Learn more
-              </a>
-            </li>
-          </ul>
-        </div>
-        <div id="social">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#social-icon"></use>
-          </svg>
-          <h2>Connect with us</h2>
-          <p>Join the Vite community</p>
-          <ul>
-            <li>
-              <a href="https://github.com/vitejs/vite" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
+        <List sx={{ px: 2 }}>
+          {menuItems.map((item) => {
+            const active = location.pathname === item.path;
+            return (
+              <ListItem key={item.title} disablePadding sx={{ mb: 1 }}>
+                <ListItemButton
+                  component={Link}
+                  to={item.path}
+                  sx={{
+                    borderRadius: 2,
+                    color: active ? 'primary.main' : 'text.secondary',
+                    bgcolor: active ? 'rgba(0, 167, 111, 0.08)' : 'transparent',
+                    '&:hover': {
+                      bgcolor: active ? 'rgba(0, 167, 111, 0.16)' : 'rgba(145, 158, 171, 0.08)',
+                    }
+                  }}
                 >
-                  <use href="/icons.svg#github-icon"></use>
-                </svg>
-                GitHub
-              </a>
-            </li>
-            <li>
-              <a href="https://chat.vite.dev/" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#discord-icon"></use>
-                </svg>
-                Discord
-              </a>
-            </li>
-            <li>
-              <a href="https://x.com/vite_js" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#x-icon"></use>
-                </svg>
-                X.com
-              </a>
-            </li>
-            <li>
-              <a href="https://bsky.app/profile/vite.dev" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#bluesky-icon"></use>
-                </svg>
-                Bluesky
-              </a>
-            </li>
-          </ul>
-        </div>
-      </section>
-
-      <div className="ticks"></div>
-      <section id="spacer"></section>
-    </>
-  )
+                  <ListItemIcon sx={{ color: 'inherit', minWidth: 40 }}>
+                    {item.icon}
+                  </ListItemIcon>
+                  <ListItemText 
+                    primary={item.title} 
+                    primaryTypographyProps={{ variant: 'body2', fontWeight: active ? 600 : 500 }} 
+                  />
+                </ListItemButton>
+              </ListItem>
+            );
+          })}
+        </List>
+      </Drawer>
+    </Box>
+  );
 }
 
-export default App
+function Topbar() {
+  return (
+    <AppBar position="fixed" sx={{ width: `calc(100% - ${DRAWER_WIDTH}px)`, ml: `${DRAWER_WIDTH}px` }}>
+      <Toolbar sx={{ justifyContent: 'flex-end', minHeight: 80 }}>
+        <IconButton sx={{ color: 'text.secondary' }}>
+          <SearchRounded />
+        </IconButton>
+        <IconButton sx={{ color: 'text.secondary', ml: 1 }}>
+          <NotificationsRounded />
+        </IconButton>
+        <Avatar sx={{ ml: 2, width: 40, height: 40 }} />
+      </Toolbar>
+    </AppBar>
+  );
+}
+
+// Pages
+const Dashboard = () => (
+  <Box>
+    <Typography variant="h4" sx={{ mb: 5 }}>Hi, Welcome back 👋</Typography>
+    <Grid container spacing={3}>
+      <Grid item xs={12} md={4}>
+        <Card sx={{ bgcolor: 'primary.lighter', color: 'primary.darker' }}>
+          <CardContent>
+            <Typography variant="h3">24</Typography>
+            <Typography variant="subtitle2" sx={{ opacity: 0.72 }}>Active Cases</Typography>
+          </CardContent>
+        </Card>
+      </Grid>
+      <Grid item xs={12} md={4}>
+        <Card sx={{ bgcolor: '#FFF7CD', color: '#7A4F01' }}>
+          <CardContent>
+            <Typography variant="h3">135</Typography>
+            <Typography variant="subtitle2" sx={{ opacity: 0.72 }}>Total Documents</Typography>
+          </CardContent>
+        </Card>
+      </Grid>
+      <Grid item xs={12} md={4}>
+        <Card sx={{ bgcolor: '#FFE7D9', color: '#7A0C2E' }}>
+          <CardContent>
+            <Typography variant="h3">5</Typography>
+            <Typography variant="subtitle2" sx={{ opacity: 0.72 }}>Pending Approvals</Typography>
+          </CardContent>
+        </Card>
+      </Grid>
+    </Grid>
+  </Box>
+);
+
+function App() {
+  return (
+    <Box sx={{ display: 'flex', minHeight: '100vh' }}>
+      <Sidebar />
+      <Topbar />
+      <Box component="main" sx={{ flexGrow: 1, p: 3, pt: 12, bgcolor: '#ffffff' }}>
+        <Routes>
+          <Route path="/" element={<Dashboard />} />
+          <Route path="/documents" element={<Documents />} />
+          <Route path="/search" element={<Search />} />
+        </Routes>
+      </Box>
+    </Box>
+  );
+}
+
+export default App;

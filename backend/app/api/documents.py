@@ -1,17 +1,16 @@
+import hashlib
 import os
 import uuid
-import hashlib
-from typing import List
-from datetime import datetime
-from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, BackgroundTasks
+
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
-from app.database import get_db
-from app.models import User, Document, DocumentVersion, AuditLog
+from app.core.config import settings
 from app.core.security import get_current_user
 from app.core.storage import get_storage_client
-from app.core.config import settings
+from app.database import get_db
+from app.models import AuditLog, Document, DocumentVersion, User
 from app.services.extraction import process_document_pipeline
 
 router = APIRouter(prefix="/documents", tags=["Documents"])
@@ -122,7 +121,7 @@ async def upload_document(
             ContentType='application/pdf'
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to upload to storage: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to upload to storage: {e!s}")
         
     # 5. Kick off Background Task for OCR + LLM
     background_tasks.add_task(
