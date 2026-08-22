@@ -5,7 +5,7 @@ from sqlalchemy import text
 from typing import List
 
 from app.database import get_db
-from app.models import User, Document, Case, CaseAssignment
+from app.models import User, Document, DocumentVersion, Case, CaseAssignment
 from app.core.security import get_current_user
 from pydantic import BaseModel
 import uuid
