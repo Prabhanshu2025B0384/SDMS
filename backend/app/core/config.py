@@ -4,7 +4,7 @@ class Settings(BaseSettings):
     PROJECT_NAME: str = "Secure DMS"
     
     # Database (Defaulting to asyncpg)
-    DATABASE_URL: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/securedms"
+    DATABASE_URL: str = "postgresql+asyncpg://raunakpratapkushwaha@localhost:5432/securedms"
     
     # JWT Settings
     SECRET_KEY: str = "CHANGE_ME_IN_PRODUCTION_SUPER_SECRET_KEY"
