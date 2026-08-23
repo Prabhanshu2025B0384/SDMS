@@ -40,7 +40,7 @@ export default function Documents() {
   const fetchDocuments = async () => {
     setLoading(true);
     try {
-      const res = await fetch('http://127.0.0.1:8000/documents', {
+      const res = await fetch(`http://${window.location.hostname}:8000/documents`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       if (res.ok) {
@@ -68,7 +68,7 @@ export default function Documents() {
       formData.append('case_id', caseId);
       formData.append('document_type', docType);
       
-      const res = await fetch('http://127.0.0.1:8000/documents/upload', {
+      const res = await fetch(`http://${window.location.hostname}:8000/documents/upload`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}` },
         body: formData

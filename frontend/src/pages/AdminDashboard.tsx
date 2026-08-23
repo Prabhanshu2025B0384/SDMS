@@ -21,7 +21,8 @@ import {
   DialogActions,
   TextField,
   Stack,
-  Breadcrumbs
+  Breadcrumbs,
+  MenuItem
 } from '@mui/material';
 import { DeleteRounded, EditRounded, VerifiedUserRounded, AdminPanelSettingsRounded } from '@mui/icons-material';
 import { useAuth } from '../context/AuthContext';
@@ -50,12 +51,27 @@ export default function AdminDashboard() {
     role: 'Investigating Officer'
   });
   
+  const [openEditUser, setOpenEditUser] = useState(false);
+  const [editingUserId, setEditingUserId] = useState<string | null>(null);
+  const [editUserForm, setEditUserForm] = useState({
+    email: '',
+    password: '',
+    department: '',
+    role: 'Investigating Officer',
+    is_active: true
+  });
+  
+  const [deleteConfirm, setDeleteConfirm] = useState<{ open: boolean; type: 'user' | 'case' | null; id: string | null }>({
+    open: false, type: null, id: null
+  });
+  const [isDeleting, setIsDeleting] = useState(false);
+  
   const { token } = useAuth();
 
   const fetchUsers = async () => {
     setLoading(true);
     try {
-      const res = await fetch('http://127.0.0.1:8000/admin/users', { headers: { 'Authorization': `Bearer ${token}` } });
+      const res = await fetch(`http://${window.location.hostname}:8000/admin/users`, { headers: { 'Authorization': `Bearer ${token}` } });
       if (res.ok) setUsers(await res.json());
     } finally { setLoading(false); }
   };
@@ -63,7 +79,7 @@ export default function AdminDashboard() {
   const fetchCases = async () => {
     setLoading(true);
     try {
-      const res = await fetch('http://127.0.0.1:8000/admin/cases', { headers: { 'Authorization': `Bearer ${token}` } });
+      const res = await fetch(`http://${window.location.hostname}:8000/admin/cases`, { headers: { 'Authorization': `Bearer ${token}` } });
       if (res.ok) setCases(await res.json());
     } finally { setLoading(false); }
   };
@@ -71,7 +87,7 @@ export default function AdminDashboard() {
   const fetchAuditLogs = async () => {
     setLoading(true);
     try {
-      const res = await fetch('http://127.0.0.1:8000/admin/audit-logs', { headers: { 'Authorization': `Bearer ${token}` } });
+      const res = await fetch(`http://${window.location.hostname}:8000/admin/audit-logs`, { headers: { 'Authorization': `Bearer ${token}` } });
       if (res.ok) setAuditLogs(await res.json());
     } finally { setLoading(false); }
   };
@@ -85,7 +101,7 @@ export default function AdminDashboard() {
         full_name: newUserForm.full_name,
         role: newUserForm.role
       });
-      const res = await fetch(`http://127.0.0.1:8000/auth/signup?${queryParams.toString()}`, {
+      const res = await fetch(`http://${window.location.hostname}:8000/auth/signup?${queryParams.toString()}`, {
         method: 'POST',
       });
       
@@ -99,6 +115,98 @@ export default function AdminDashboard() {
       }
     } catch (e) {
       alert("Error adding user.");
+    } finally {
+      setSubmittingUser(false);
+    }
+  };
+
+  const executeDelete = async () => {
+    setIsDeleting(true);
+    try {
+      if (deleteConfirm.type === 'user') {
+        const res = await fetch(`http://${window.location.hostname}:8000/admin/users/${deleteConfirm.id}`, {
+          method: 'DELETE',
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (res.ok) {
+          fetchUsers();
+        } else {
+          const data = await res.json().catch(() => ({}));
+          alert(`Failed to delete user: ${data.detail || 'Unknown error'}`);
+        }
+      } else if (deleteConfirm.type === 'case') {
+        const res = await fetch(`http://${window.location.hostname}:8000/admin/cases/${deleteConfirm.id}`, {
+          method: 'DELETE',
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (res.ok) {
+          fetchCases();
+        } else {
+          const data = await res.json().catch(() => ({}));
+          alert(`Failed to delete case: ${data.detail || 'Unknown error'}`);
+        }
+      }
+      setDeleteConfirm({ open: false, type: null, id: null });
+    } catch(e) {
+      alert("Network error occurred during deletion.");
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  const handleToggleUserStatus = async (user: any) => {
+    try {
+      const res = await fetch(`http://${window.location.hostname}:8000/admin/users/${user.id}`, {
+        method: 'PATCH',
+        headers: { 
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ is_active: !user.is_active })
+      });
+      if (res.ok) fetchUsers();
+      else alert("Failed to update status.");
+    } catch (e) {
+      alert("Error updating status.");
+    }
+  };
+
+  const handleEditClick = (user: any) => {
+    setEditingUserId(user.id);
+    setEditUserForm({
+      email: user.email,
+      password: '', // Leave blank unless they want to change it
+      department: user.department,
+      role: user.role,
+      is_active: user.is_active
+    });
+    setOpenEditUser(true);
+  };
+
+  const handleUpdateUser = async () => {
+    if (!editingUserId) return;
+    setSubmittingUser(true);
+    try {
+      // Remove empty password from payload so it doesn't get updated
+      const payload: any = { ...editUserForm };
+      if (!payload.password) delete payload.password;
+
+      const res = await fetch(`http://${window.location.hostname}:8000/admin/users/${editingUserId}`, {
+        method: 'PATCH',
+        headers: { 
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(payload)
+      });
+      if (res.ok) {
+        setOpenEditUser(false);
+        fetchUsers();
+      } else {
+        alert("Failed to update user.");
+      }
+    } catch (e) {
+      alert("Error updating user.");
     } finally {
       setSubmittingUser(false);
     }
@@ -166,10 +274,17 @@ export default function AdminDashboard() {
                             color={user.role === 'Admin' ? 'error' : 'default'}
                           />
                         </TableCell>
-                        <TableCell><Chip label={user.is_active ? 'Active' : 'Inactive'} size="small" color={user.is_active ? "success" : "error"} /></TableCell>
+                        <TableCell>
+                          <Chip 
+                            label={user.is_active ? 'Account Enabled' : 'Account Disabled'} 
+                            size="small" 
+                            color={user.is_active ? "success" : "error"} 
+                            variant="outlined"
+                          />
+                        </TableCell>
                         <TableCell align="right">
-                          <IconButton color="info"><EditRounded /></IconButton>
-                          <IconButton color="error"><DeleteRounded /></IconButton>
+                          <IconButton color="info" onClick={() => handleEditClick(user)} title="Edit User"><EditRounded /></IconButton>
+                          <IconButton color="error" onClick={() => confirmDelete('user', user.id)}><DeleteRounded /></IconButton>
                         </TableCell>
                       </TableRow>
                     ))}
@@ -188,14 +303,13 @@ export default function AdminDashboard() {
                     <TextField label="Password" type="password" fullWidth value={newUserForm.password} onChange={(e) => setNewUserForm({...newUserForm, password: e.target.value})} />
                     <TextField 
                       select
-                      SelectProps={{ native: true }}
                       label="Role" 
                       fullWidth 
                       value={newUserForm.role} 
                       onChange={(e) => setNewUserForm({...newUserForm, role: e.target.value})}
                     >
-                      <option value="Investigating Officer">Investigating Officer</option>
-                      <option value="Admin">Admin</option>
+                      <MenuItem value="Investigating Officer">Investigating Officer</MenuItem>
+                      <MenuItem value="Admin">Admin</MenuItem>
                     </TextField>
                   </Box>
                 </DialogContent>
@@ -203,6 +317,60 @@ export default function AdminDashboard() {
                   <Button onClick={() => setOpenAddUser(false)} color="inherit" disabled={submittingUser}>Cancel</Button>
                   <Button onClick={handleAddUser} variant="contained" disabled={!newUserForm.email || !newUserForm.password || submittingUser}>
                     {submittingUser ? <CircularProgress size={24} color="inherit" /> : 'Create User'}
+                  </Button>
+                </DialogActions>
+              </Dialog>
+
+              {/* Edit User Dialog */}
+              <Dialog open={openEditUser} onClose={() => setOpenEditUser(false)} maxWidth="sm" fullWidth>
+                <DialogTitle>Edit User</DialogTitle>
+                <DialogContent dividers>
+                  <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3, pt: 1 }}>
+                    <TextField label="Email Address" fullWidth value={editUserForm.email} onChange={(e) => setEditUserForm({...editUserForm, email: e.target.value})} />
+                    <TextField label="New Password (leave blank to keep current)" type="password" fullWidth value={editUserForm.password} onChange={(e) => setEditUserForm({...editUserForm, password: e.target.value})} />
+                    <TextField label="Department" fullWidth value={editUserForm.department} onChange={(e) => setEditUserForm({...editUserForm, department: e.target.value})} />
+                    <TextField 
+                      select
+                      label="Role" 
+                      fullWidth 
+                      value={editUserForm.role} 
+                      onChange={(e) => setEditUserForm({...editUserForm, role: e.target.value})}
+                    >
+                      <MenuItem value="Investigating Officer">Investigating Officer</MenuItem>
+                      <MenuItem value="Admin">Admin</MenuItem>
+                    </TextField>
+                    <TextField 
+                      select
+                      label="Status" 
+                      fullWidth 
+                      value={editUserForm.is_active ? "true" : "false"} 
+                      onChange={(e) => setEditUserForm({...editUserForm, is_active: e.target.value === "true"})}
+                    >
+                      <MenuItem value="true">Active</MenuItem>
+                      <MenuItem value="false">Inactive</MenuItem>
+                    </TextField>
+                  </Box>
+                </DialogContent>
+                <DialogActions sx={{ p: 2.5 }}>
+                  <Button onClick={() => setOpenEditUser(false)} color="inherit" disabled={submittingUser}>Cancel</Button>
+                  <Button onClick={handleUpdateUser} variant="contained" disabled={!editUserForm.email || submittingUser}>
+                    {submittingUser ? <CircularProgress size={24} color="inherit" /> : 'Save Changes'}
+                  </Button>
+                </DialogActions>
+              </Dialog>
+
+              {/* Confirm Delete Dialog */}
+              <Dialog open={deleteConfirm.open} onClose={() => setDeleteConfirm({ open: false, type: null, id: null })} maxWidth="xs" fullWidth>
+                <DialogTitle>Confirm Deletion</DialogTitle>
+                <DialogContent dividers>
+                  <Typography>
+                    Are you sure you want to permanently delete this {deleteConfirm.type}? This action cannot be undone and may affect associated records.
+                  </Typography>
+                </DialogContent>
+                <DialogActions sx={{ p: 2 }}>
+                  <Button onClick={() => setDeleteConfirm({ open: false, type: null, id: null })} color="inherit" disabled={isDeleting}>Cancel</Button>
+                  <Button onClick={executeDelete} variant="contained" color="error" disabled={isDeleting}>
+                    {isDeleting ? <CircularProgress size={24} color="inherit" /> : 'Delete Permanently'}
                   </Button>
                 </DialogActions>
               </Dialog>
@@ -227,7 +395,7 @@ export default function AdminDashboard() {
                         <TableCell sx={{ fontWeight: 600 }}>{c.case_number}</TableCell>
                         <TableCell><Chip label={c.status} size="small" color="info" /></TableCell>
                         <TableCell align="right">
-                          <Button size="small" color="error" startIcon={<DeleteRounded />}>Force Delete</Button>
+                          <Button size="small" color="error" startIcon={<DeleteRounded />} onClick={() => confirmDelete('case', c.id)}>Force Delete</Button>
                         </TableCell>
                       </TableRow>
                     ))}

@@ -9,6 +9,7 @@ export default function Login() {
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
+  const [info, setInfo] = useState('');
   const { login, user } = useAuth();
   const navigate = useNavigate();
   const theme = useTheme();
@@ -28,7 +29,7 @@ export default function Login() {
       formData.append('username', email);
       formData.append('password', password);
 
-      const response = await fetch('http://127.0.0.1:8000/auth/login', {
+      const response = await fetch(`http://${window.location.hostname}:8000/auth/login`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded',
@@ -40,7 +41,7 @@ export default function Login() {
         const data = await response.json();
         const token = data.access_token;
 
-        const meRes = await fetch('http://127.0.0.1:8000/auth/me', {
+        const meRes = await fetch(`http://${window.location.hostname}:8000/auth/me`, {
           headers: { 'Authorization': `Bearer ${token}` }
         });
 
@@ -109,6 +110,7 @@ export default function Login() {
           </Stack>
 
           {error && <Alert severity="error" sx={{ mb: 3, borderRadius: 2 }}>{error}</Alert>}
+          {info && <Alert severity="info" sx={{ mb: 3, borderRadius: 2 }}>{info}</Alert>}
 
           <form onSubmit={handleLogin}>
             <Stack spacing={3}>
@@ -118,7 +120,6 @@ export default function Login() {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
-                InputLabelProps={{ shrink: true }}
               />
               <TextField
                 fullWidth
@@ -127,27 +128,28 @@ export default function Login() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
-                InputLabelProps={{ shrink: true }}
-                InputProps={{
-                  endAdornment: (
-                    <InputAdornment position="end">
-                      <IconButton onClick={() => setShowPassword(!showPassword)} edge="end">
-                        {showPassword ? <VisibilityOff /> : <Visibility />}
-                      </IconButton>
-                    </InputAdornment>
-                  ),
+                slotProps={{
+                  input: {
+                    endAdornment: (
+                      <InputAdornment position="end">
+                        <IconButton onClick={() => setShowPassword(!showPassword)} edge="end">
+                          {showPassword ? <VisibilityOff /> : <Visibility />}
+                        </IconButton>
+                      </InputAdornment>
+                    ),
+                  }
                 }}
               />
-              <Stack direction="row" alignItems="center" justifyContent="flex-end" sx={{ mt: -1 }}>
-                <Typography
-                  variant="body2"
-                  color="text.secondary"
-                  onClick={() => alert("Connect to Admin")}
+              <Box sx={{ display: 'flex', flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', mt: -1 }}>
+                <Typography 
+                  variant="body2" 
+                  color="text.secondary" 
+                  onClick={() => setInfo("Please connect to your Administrator to reset your password.")}
                   sx={{ textDecoration: 'underline', cursor: 'pointer' }}
                 >
                   Forgot password?
                 </Typography>
-              </Stack>
+              </Box>
               <Button
                 fullWidth
                 size="large"

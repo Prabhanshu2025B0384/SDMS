@@ -25,7 +25,7 @@ export default function Search() {
       if (query.length > 2) {
         setLoading(true);
         try {
-          const res = await fetch(`http://127.0.0.1:8000/search/documents?query=${query}`, {
+          const res = await fetch(`http://${window.location.hostname}:8000/search/documents?query=${query}`, {
             headers: { 'Authorization': `Bearer ${token}` }
           });
           if (res.ok) {
