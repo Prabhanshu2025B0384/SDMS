@@ -31,12 +31,16 @@ async def lifespan(app: FastAPI):
                 password_hash=get_password_hash("adminhumai"),
                 department="System Admin",
                 role="Admin",
+                clearance_level=5,
                 is_active=True
             )
             db.add(admin_user)
             await db.commit()
             await db.refresh(admin_user)
             print("Initialized default Admin user: admin12032008@gmail.com")
+        elif admin_user.clearance_level != 5:
+            admin_user.clearance_level = 5
+            await db.commit()
 
         case_res = await db.execute(select(Case))
         first_case = case_res.scalars().first()

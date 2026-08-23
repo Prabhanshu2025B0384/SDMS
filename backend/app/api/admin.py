@@ -1,33 +1,91 @@
+import uuid
+from datetime import datetime
+from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Body
 from pydantic import BaseModel
 from typing import Optional
+from sqlalchemy import func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.exc import IntegrityError
 
 from app.database import get_db
-from app.models import User, Case, Document, AuditLog
+from app.models import User, Case, Document, DocumentPermission, AuditLog
 from app.core.security import get_current_user, get_password_hash
-from app.core.authorization import RoleChecker
+from app.core.authorization import RoleChecker, CLEARANCE_LEVELS
 
 router = APIRouter(
-    prefix="/admin", 
+    prefix="/admin",
     tags=["Admin"],
     dependencies=[Depends(RoleChecker(["MANAGE_USERS", "DELETE"]))]
 )
 
-# ---- USERS ----
+
+# ─── USERS ───────────────────────────────────────────────────────────────────
+
 @router.get("/users")
 async def list_all_users(db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(User))
-    return result.scalars().all()
+    result = await db.execute(select(User).order_by(User.clearance_level.desc()))
+    users = result.scalars().all()
+    return [
+        {
+            "id": str(u.id),
+            "email": u.email,
+            "role": u.role,
+            "department": u.department,
+            "clearance_level": u.clearance_level or 1,
+            "clearance_label": CLEARANCE_LEVELS.get(u.clearance_level or 1, {}).get("name", "Level 1"),
+            "is_active": u.is_active
+        }
+        for u in users
+    ]
+
 
 class UserUpdate(BaseModel):
     email: Optional[str] = None
     password: Optional[str] = None
     role: Optional[str] = None
     department: Optional[str] = None
+    clearance_level: Optional[int] = None
     is_active: Optional[bool] = None
+
+
+class UserCreate(BaseModel):
+    email: str
+    password: str
+    role: str = "Investigating Officer"
+    department: str = "General"
+    clearance_level: int = 1
+
+
+@router.post("/users")
+async def create_user(payload: UserCreate, db: AsyncSession = Depends(get_db)):
+    existing = await db.execute(select(User).where(User.email == payload.email))
+    if existing.scalar_one_or_none():
+        raise HTTPException(status_code=400, detail="Email already registered")
+
+    new_user = User(
+        id=uuid.uuid4(),
+        email=payload.email,
+        password_hash=get_password_hash(payload.password),
+        role=payload.role,
+        department=payload.department,
+        clearance_level=max(1, min(5, payload.clearance_level)),
+        is_active=True
+    )
+    db.add(new_user)
+    await db.commit()
+    await db.refresh(new_user)
+    return {
+        "id": str(new_user.id),
+        "email": new_user.email,
+        "role": new_user.role,
+        "department": new_user.department,
+        "clearance_level": new_user.clearance_level,
+        "clearance_label": CLEARANCE_LEVELS.get(new_user.clearance_level, {}).get("name", "Level 1"),
+        "is_active": new_user.is_active
+    }
+
 
 @router.patch("/users/{user_id}")
 async def update_user(user_id: str, payload: UserUpdate, db: AsyncSession = Depends(get_db)):
@@ -35,7 +93,7 @@ async def update_user(user_id: str, payload: UserUpdate, db: AsyncSession = Depe
     user = result.scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    
+
     if payload.email is not None:
         user.email = payload.email
     if payload.password is not None and len(payload.password) > 0:
@@ -44,12 +102,23 @@ async def update_user(user_id: str, payload: UserUpdate, db: AsyncSession = Depe
         user.role = payload.role
     if payload.department is not None:
         user.department = payload.department
+    if payload.clearance_level is not None:
+        user.clearance_level = max(1, min(5, payload.clearance_level))
     if payload.is_active is not None:
         user.is_active = payload.is_active
-        
+
     await db.commit()
     await db.refresh(user)
-    return user
+    return {
+        "id": str(user.id),
+        "email": user.email,
+        "role": user.role,
+        "department": user.department,
+        "clearance_level": user.clearance_level,
+        "clearance_label": CLEARANCE_LEVELS.get(user.clearance_level, {}).get("name", "Level 1"),
+        "is_active": user.is_active
+    }
+
 
 @router.delete("/users/{user_id}")
 async def delete_user(user_id: str, db: AsyncSession = Depends(get_db)):
@@ -64,15 +133,32 @@ async def delete_user(user_id: str, db: AsyncSession = Depends(get_db)):
     except IntegrityError:
         await db.rollback()
         raise HTTPException(
-            status_code=400, 
+            status_code=400,
             detail="Cannot delete this user because they are linked to existing cases, documents, or audit logs."
         )
 
-# ---- CASES ----
+
+# ─── CASES ───────────────────────────────────────────────────────────────────
+
 @router.get("/cases")
 async def list_all_cases(db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Case))
-    return result.scalars().all()
+    cases = result.scalars().all()
+    users_result = await db.execute(select(User))
+    users_map = {str(u.id): u.email for u in users_result.scalars().all()}
+    return [
+        {
+            "id": str(c.id),
+            "case_number": c.case_number,
+            "status": c.status,
+            "jurisdiction": c.jurisdiction,
+            "owning_officer_id": str(c.owning_officer_id),
+            "owning_officer_email": users_map.get(str(c.owning_officer_id), "Unknown"),
+            "created_at": c.created_at.isoformat() if c.created_at else None
+        }
+        for c in cases
+    ]
+
 
 @router.delete("/cases/{case_id}")
 async def delete_case(case_id: str, db: AsyncSession = Depends(get_db)):
@@ -87,15 +173,18 @@ async def delete_case(case_id: str, db: AsyncSession = Depends(get_db)):
     except IntegrityError:
         await db.rollback()
         raise HTTPException(
-            status_code=400, 
+            status_code=400,
             detail="Cannot delete this case because it is linked to existing documents or audit logs."
         )
 
-# ---- DOCUMENTS ----
+
+# ─── DOCUMENTS ───────────────────────────────────────────────────────────────
+
 @router.get("/documents")
 async def list_all_documents(db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Document))
     return result.scalars().all()
+
 
 @router.delete("/documents/{document_id}")
 async def delete_document(document_id: str, db: AsyncSession = Depends(get_db)):
@@ -107,9 +196,112 @@ async def delete_document(document_id: str, db: AsyncSession = Depends(get_db)):
     await db.commit()
     return {"message": "Document deleted"}
 
-# ---- AUDIT LOGS ----
+
+@router.get("/documents/{document_id}/access-history")
+async def get_document_access_history(
+    document_id: str,
+    db: AsyncSession = Depends(get_db)
+):
+    """Returns chronological access history (VIEW + DOWNLOAD events) for a specific document."""
+    doc_result = await db.execute(select(Document).where(Document.id == document_id))
+    doc = doc_result.scalar_one_or_none()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    logs_result = await db.execute(
+        select(AuditLog).where(
+            AuditLog.document_id == document_id,
+            AuditLog.action.in_(["VIEW", "DOWNLOAD", "SHARE"])
+        ).order_by(AuditLog.timestamp.desc())
+    )
+    logs = logs_result.scalars().all()
+
+    users_result = await db.execute(select(User))
+    users_map = {str(u.id): {"email": u.email, "role": u.role} for u in users_result.scalars().all()}
+
+    return {
+        "document_id": document_id,
+        "document_title": doc.title,
+        "total_views": sum(1 for l in logs if l.action == "VIEW"),
+        "total_downloads": sum(1 for l in logs if l.action == "DOWNLOAD"),
+        "access_records": [
+            {
+                "id": str(l.id),
+                "timestamp": l.timestamp.isoformat(),
+                "action": l.action,
+                "user_id": str(l.user_id) if l.user_id else None,
+                "user_email": users_map.get(str(l.user_id), {}).get("email", "Unknown"),
+                "user_role": users_map.get(str(l.user_id), {}).get("role", "Unknown"),
+                "details": l.details
+            }
+            for l in logs
+        ]
+    }
+
+
+# ─── AUDIT LOGS ──────────────────────────────────────────────────────────────
+
 @router.get("/audit-logs")
-async def list_audit_logs(db: AsyncSession = Depends(get_db)):
-    # Admin can view all audit logs
-    result = await db.execute(select(AuditLog).order_by(AuditLog.timestamp.desc()))
-    return result.scalars().all()
+async def list_audit_logs(
+    action: Optional[str] = None,
+    user_id: Optional[str] = None,
+    document_id: Optional[str] = None,
+    db: AsyncSession = Depends(get_db)
+):
+    """Enhanced audit log with filtering and summary analytics."""
+    query = select(AuditLog).order_by(AuditLog.timestamp.desc())
+
+    if action and action != "ALL":
+        query = query.where(AuditLog.action == action)
+    if user_id:
+        query = query.where(AuditLog.user_id == user_id)
+    if document_id:
+        query = query.where(AuditLog.document_id == document_id)
+
+    result = await db.execute(query)
+    logs = result.scalars().all()
+
+    users_result = await db.execute(select(User))
+    users_map = {str(u.id): {"email": u.email, "role": u.role, "clearance_level": u.clearance_level} for u in users_result.scalars().all()}
+
+    docs_result = await db.execute(select(Document))
+    docs_map = {str(d.id): d.title for d in docs_result.scalars().all()}
+
+    # Summary metrics
+    total = len(logs)
+    total_views = sum(1 for l in logs if l.action == "VIEW")
+    total_downloads = sum(1 for l in logs if l.action == "DOWNLOAD")
+    total_uploads = sum(1 for l in logs if l.action == "UPLOAD")
+    total_logins = sum(1 for l in logs if l.action == "LOGIN")
+    total_shares = sum(1 for l in logs if l.action == "SHARE")
+    unique_users = len(set(str(l.user_id) for l in logs if l.user_id))
+
+    return {
+        "summary": {
+            "total": total,
+            "views": total_views,
+            "downloads": total_downloads,
+            "uploads": total_uploads,
+            "logins": total_logins,
+            "shares": total_shares,
+            "unique_users": unique_users
+        },
+        "logs": [
+            {
+                "id": str(l.id),
+                "timestamp": l.timestamp.isoformat() if l.timestamp else None,
+                "action": l.action,
+                "result": l.result,
+                "user_id": str(l.user_id) if l.user_id else None,
+                "user_email": users_map.get(str(l.user_id), {}).get("email", "System"),
+                "user_role": users_map.get(str(l.user_id), {}).get("role", "System"),
+                "user_clearance": users_map.get(str(l.user_id), {}).get("clearance_level", 1),
+                "document_id": str(l.document_id) if l.document_id else None,
+                "document_title": docs_map.get(str(l.document_id), None) if l.document_id else None,
+                "case_id": str(l.case_id) if l.case_id else None,
+                "details": l.details,
+                "current_hash": (l.current_hash or "")[:16]
+            }
+            for l in logs
+        ]
+    }

@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import JSON, Boolean, Column, DateTime, ForeignKey, Index, String, Text, TypeDecorator
+from sqlalchemy import JSON, Boolean, Column, DateTime, ForeignKey, Index, Integer, String, Text, TypeDecorator
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import relationship
 
@@ -51,6 +51,7 @@ class User(Base):
     password_hash = Column(String, nullable=False)
     role = Column(String, nullable=False)
     department = Column(String, nullable=False)
+    clearance_level = Column(Integer, default=1, nullable=False) # 1: Junior, 2: Inspector, 3: Senior IO, 4: SP/Senior, 5: Executive/Admin
     is_active = Column(Boolean, default=True)
 
 
@@ -78,6 +79,7 @@ class Document(Base):
     case_id = Column(GUID, ForeignKey("cases.id"), nullable=False)
     title = Column(String, nullable=False)
     document_type = Column(String, nullable=False)
+    classification_level = Column(Integer, default=1, nullable=False) # 1: Unrestricted, 2: Confidential, 3: Secret, 4: Top Secret, 5: Executive
     status = Column(String, default="PROCESSING")
     created_at = Column(DateTime, default=datetime.utcnow)
     current_version_id = Column(GUID, nullable=True)
@@ -85,6 +87,16 @@ class Document(Base):
     
     # Relationships
     case = relationship("Case", backref="documents")
+
+
+class DocumentPermission(Base):
+    __tablename__ = "document_permissions"
+    id = Column(GUID, primary_key=True, default=uuid.uuid4)
+    document_id = Column(GUID, ForeignKey("documents.id"), nullable=False)
+    user_id = Column(GUID, ForeignKey("users.id"), nullable=False)
+    permission_type = Column(String, default="VIEW", nullable=False) # VIEW, DOWNLOAD, EDIT
+    granted_by = Column(GUID, ForeignKey("users.id"), nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
 
 
 class DocumentVersion(Base):
@@ -112,4 +124,5 @@ class AuditLog(Base):
     details = Column(JSON, nullable=True)
     previous_hash = Column(String, nullable=True)
     current_hash = Column(String, nullable=False)
+
 

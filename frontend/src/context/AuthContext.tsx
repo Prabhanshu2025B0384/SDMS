@@ -4,6 +4,9 @@ interface User {
   id: string;
   email: string;
   role: string;
+  department?: string;
+  clearance_level?: number;
+  is_active?: boolean;
 }
 
 interface AuthContextType {

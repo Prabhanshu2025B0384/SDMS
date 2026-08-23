@@ -33,10 +33,24 @@ import {
   FolderRounded,
   CloseRounded,
   RefreshRounded,
-  AutoAwesomeRounded
+  AutoAwesomeRounded,
+  ShareRounded,
+  ShieldRounded
 } from '@mui/icons-material';
 import { useAuth } from '../context/AuthContext';
 import { Link as RouterLink } from 'react-router-dom';
+import ShareDocumentDialog from '../components/ShareDocumentDialog';
+
+const CLEARANCE_COLORS: Record<number, 'default' | 'info' | 'warning' | 'error' | 'success'> = {
+  1: 'default', 2: 'info', 3: 'warning', 4: 'error', 5: 'success'
+};
+const CLEARANCE_LABELS: Record<number, string> = {
+  1: 'L1 – Restricted',
+  2: 'L2 – Confidential',
+  3: 'L3 – Secret',
+  4: 'L4 – Top Secret',
+  5: 'L5 – Executive'
+};
 
 export default function Documents() {
   const [documents, setDocuments] = useState<any[]>([]);
@@ -51,6 +65,7 @@ export default function Documents() {
   const [title, setTitle] = useState('');
   const [caseId, setCaseId] = useState('');
   const [docType, setDocType] = useState('FIR');
+  const [classificationLevel, setClassificationLevel] = useState(1);
   const [uploading, setUploading] = useState(false);
   const [loading, setLoading] = useState(false);
   const [uploadError, setUploadError] = useState('');
@@ -58,6 +73,10 @@ export default function Documents() {
   const [selectedDoc, setSelectedDoc] = useState<any | null>(null);
   const [viewLoading, setViewLoading] = useState(false);
   
+  // Share dialog state
+  const [shareDoc, setShareDoc] = useState<{ id: string; title: string; classification_level: number } | null>(null);
+  const [shareOpen, setShareOpen] = useState(false);
+
   const { token } = useAuth();
   const pollIntervalRef = useRef<any>(null);
 
@@ -176,6 +195,7 @@ export default function Documents() {
       formData.append('title', title);
       formData.append('case_id', caseId);
       formData.append('document_type', docType);
+      formData.append('classification_level', classificationLevel.toString());
       
       const res = await fetch(`http://${window.location.hostname}:8000/documents/upload`, {
         method: 'POST',
@@ -187,6 +207,7 @@ export default function Documents() {
         setOpen(false);
         setFile(null);
         setTitle('');
+        setClassificationLevel(1);
         setUploadError('');
         fetchDocuments();
       } else {
@@ -283,6 +304,7 @@ export default function Documents() {
             <TableHead>
               <TableRow>
                 <TableCell>Document Title</TableCell>
+                <TableCell>Classification</TableCell>
                 <TableCell>Type</TableCell>
                 <TableCell>Case Reference</TableCell>
                 <TableCell>Processing Status</TableCell>
@@ -291,7 +313,7 @@ export default function Documents() {
             </TableHead>
             <TableBody>
               {loading ? (
-                <TableRow><TableCell colSpan={5} align="center" sx={{ p: 5 }}><CircularProgress size={28} /></TableCell></TableRow>
+                <TableRow><TableCell colSpan={6} align="center" sx={{ p: 5 }}><CircularProgress size={28} /></TableCell></TableRow>
               ) : documents.map((doc) => (
                 <TableRow key={doc.id} hover>
                   <TableCell>
@@ -304,6 +326,15 @@ export default function Documents() {
                         </Typography>
                       </Box>
                     </Box>
+                  </TableCell>
+                  <TableCell>
+                    <Chip
+                      icon={<ShieldRounded sx={{ fontSize: '13px !important' }} />}
+                      label={CLEARANCE_LABELS[doc.classification_level || 1] || 'L1'}
+                      size="small"
+                      color={CLEARANCE_COLORS[doc.classification_level || 1] || 'default'}
+                      sx={{ fontWeight: 700, fontSize: 11 }}
+                    />
                   </TableCell>
                   <TableCell>
                     <Chip label={doc.document_type || 'General'} size="small" sx={{ bgcolor: 'rgba(145, 158, 171, 0.16)', fontWeight: 500 }} />
@@ -320,6 +351,11 @@ export default function Documents() {
                     />
                   </TableCell>
                   <TableCell align="right">
+                    <Tooltip title="Share / Permissions">
+                      <IconButton color="secondary" onClick={() => { setShareDoc(doc); setShareOpen(true); }}>
+                        <ShareRounded />
+                      </IconButton>
+                    </Tooltip>
                     <Tooltip title="View Extracted Metadata & OCR Text">
                       <IconButton color="primary" onClick={() => handleViewDetails(doc.id)} disabled={viewLoading}>
                         <VisibilityRounded />
@@ -335,7 +371,7 @@ export default function Documents() {
               ))}
               {!loading && documents.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={5} align="center" sx={{ p: 6 }}>
+                  <TableCell colSpan={6} align="center" sx={{ p: 6 }}>
                     <Typography variant="h6" color="text.secondary" gutterBottom>No documents uploaded yet</Typography>
                     <Typography variant="body2" color="text.disabled" sx={{ mb: 2 }}>
                       Click "Upload Document" to upload a PDF document and extract metadata automatically.
@@ -425,6 +461,21 @@ export default function Documents() {
 
             <TextField 
               select
+              label="Security Classification Level" 
+              fullWidth 
+              value={classificationLevel} 
+              onChange={(e) => setClassificationLevel(Number(e.target.value))}
+              helperText="Hierarchy clearance level required to access this document"
+            >
+              <MenuItem value={1}>Level 1: Restricted (All Officers)</MenuItem>
+              <MenuItem value={2}>Level 2: Confidential (Sub-Inspectors & above)</MenuItem>
+              <MenuItem value={3}>Level 3: Secret (Investigating Officers & above)</MenuItem>
+              <MenuItem value={4}>Level 4: Top Secret (Senior Officers / SP)</MenuItem>
+              <MenuItem value={5}>Level 5: Executive / Admin</MenuItem>
+            </TextField>
+
+            <TextField 
+              select
               label="Document Type" 
               fullWidth 
               value={docType} 
@@ -490,6 +541,12 @@ export default function Documents() {
           {selectedDoc && (
             <Stack spacing={3}>
               <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+                <Chip
+                  icon={<ShieldRounded sx={{ fontSize: '13px !important' }} />}
+                  label={CLEARANCE_LABELS[selectedDoc.classification_level || 1] || 'L1'}
+                  color={CLEARANCE_COLORS[selectedDoc.classification_level || 1] || 'default'}
+                  sx={{ fontWeight: 700 }}
+                />
                 <Chip label={`Type: ${selectedDoc.document_type}`} color="primary" variant="outlined" />
                 <Chip label={`Status: ${selectedDoc.status}`} color={selectedDoc.status === 'READY' ? 'success' : 'warning'} />
                 <Chip label={`Version: ${selectedDoc.version_number || '1.0'}`} variant="outlined" />
@@ -539,6 +596,20 @@ export default function Documents() {
           )}
         </DialogActions>
       </Dialog>
+
+      {/* Share Document Dialog */}
+      {shareDoc && (
+        <ShareDocumentDialog
+          open={shareOpen}
+          onClose={() => {
+            setShareOpen(false);
+            setShareDoc(null);
+          }}
+          documentId={shareDoc.id}
+          documentTitle={shareDoc.title}
+          classificationLevel={shareDoc.classification_level}
+        />
+      )}
     </Box>
   );
 }
