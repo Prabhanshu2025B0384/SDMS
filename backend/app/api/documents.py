@@ -20,8 +20,13 @@ async def get_documents(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    # In a real app we'd filter by access, but for now we'll fetch all docs
-    result = await db.execute(select(Document))
+    if current_user.role == "Admin":
+        query = select(Document)
+    else:
+        from app.models import Case
+        query = select(Document).join(Case).where(Case.owning_officer_id == current_user.id)
+        
+    result = await db.execute(query)
     docs = result.scalars().all()
     
     return [
@@ -98,6 +103,15 @@ async def upload_document(
     if not file.filename.endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF files are supported")
         
+    from app.models import Case
+    case_result = await db.execute(select(Case).where(Case.id == case_id))
+    case = case_result.scalar_one_or_none()
+    if not case:
+        raise HTTPException(status_code=404, detail="Case not found")
+        
+    if current_user.role != "Admin" and case.owning_officer_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized to upload documents to this case")
+
     file_bytes = await file.read()
     file_hash = calculate_sha256(file_bytes)
     
@@ -167,6 +181,6 @@ async def upload_document(
     
     return {
         "message": "Upload started successfully",
-        "document_id": new_doc.id,
+        "document_id": str(new_doc.id),
         "status": "PROCESSING"
     }

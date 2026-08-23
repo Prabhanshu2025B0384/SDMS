@@ -14,7 +14,12 @@ import {
   Button,
   IconButton,
   Chip,
-  CircularProgress
+  CircularProgress,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  TextField
 } from '@mui/material';
 import { DeleteRounded, EditRounded, VerifiedUserRounded, AdminPanelSettingsRounded } from '@mui/icons-material';
 import { useAuth } from '../context/AuthContext';
@@ -34,6 +39,15 @@ export default function AdminDashboard() {
   const [cases, setCases] = useState<any[]>([]);
   const [auditLogs, setAuditLogs] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
+  const [openAddUser, setOpenAddUser] = useState(false);
+  const [submittingUser, setSubmittingUser] = useState(false);
+  const [newUserForm, setNewUserForm] = useState({
+    email: '',
+    password: '',
+    full_name: '',
+    role: 'Investigating Officer'
+  });
+  
   const { token } = useAuth();
 
   const fetchUsers = async () => {
@@ -58,6 +72,34 @@ export default function AdminDashboard() {
       const res = await fetch('http://127.0.0.1:8000/admin/audit-logs', { headers: { 'Authorization': `Bearer ${token}` } });
       if (res.ok) setAuditLogs(await res.json());
     } finally { setLoading(false); }
+  };
+
+  const handleAddUser = async () => {
+    setSubmittingUser(true);
+    try {
+      const queryParams = new URLSearchParams({
+        email: newUserForm.email,
+        password: newUserForm.password,
+        full_name: newUserForm.full_name,
+        role: newUserForm.role
+      });
+      const res = await fetch(`http://127.0.0.1:8000/auth/signup?${queryParams.toString()}`, {
+        method: 'POST',
+      });
+      
+      if (res.ok) {
+        setOpenAddUser(false);
+        setNewUserForm({ email: '', password: '', full_name: '', role: 'Investigating Officer' });
+        fetchUsers();
+      } else {
+        const data = await res.json();
+        alert(`Failed to add user: ${data.detail}`);
+      }
+    } catch (e) {
+      alert("Error adding user.");
+    } finally {
+      setSubmittingUser(false);
+    }
   };
 
   useEffect(() => {
@@ -90,7 +132,7 @@ export default function AdminDashboard() {
           <>
             <TabPanel value={tabValue} index={0}>
               <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 2 }}>
-                <Button variant="contained" color="primary">Add New User</Button>
+                <Button variant="contained" color="primary" onClick={() => setOpenAddUser(true)}>Add New User</Button>
               </Box>
               <TableContainer>
                 <Table>
@@ -125,6 +167,35 @@ export default function AdminDashboard() {
                   </TableBody>
                 </Table>
               </TableContainer>
+
+              {/* Add User Dialog */}
+              <Dialog open={openAddUser} onClose={() => setOpenAddUser(false)} maxWidth="sm" fullWidth>
+                <DialogTitle>Add New User</DialogTitle>
+                <DialogContent dividers>
+                  <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3, pt: 1 }}>
+                    <TextField label="Full Name" fullWidth value={newUserForm.full_name} onChange={(e) => setNewUserForm({...newUserForm, full_name: e.target.value})} />
+                    <TextField label="Email Address" fullWidth value={newUserForm.email} onChange={(e) => setNewUserForm({...newUserForm, email: e.target.value})} />
+                    <TextField label="Password" type="password" fullWidth value={newUserForm.password} onChange={(e) => setNewUserForm({...newUserForm, password: e.target.value})} />
+                    <TextField 
+                      select
+                      SelectProps={{ native: true }}
+                      label="Role" 
+                      fullWidth 
+                      value={newUserForm.role} 
+                      onChange={(e) => setNewUserForm({...newUserForm, role: e.target.value})}
+                    >
+                      <option value="Investigating Officer">Investigating Officer</option>
+                      <option value="Admin">Admin</option>
+                    </TextField>
+                  </Box>
+                </DialogContent>
+                <DialogActions sx={{ p: 2.5 }}>
+                  <Button onClick={() => setOpenAddUser(false)} color="inherit" disabled={submittingUser}>Cancel</Button>
+                  <Button onClick={handleAddUser} variant="contained" disabled={!newUserForm.email || !newUserForm.password || submittingUser}>
+                    {submittingUser ? <CircularProgress size={24} color="inherit" /> : 'Create User'}
+                  </Button>
+                </DialogActions>
+              </Dialog>
             </TabPanel>
 
             <TabPanel value={tabValue} index={1}>

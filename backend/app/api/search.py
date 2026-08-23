@@ -17,15 +17,26 @@ async def search_documents(
     current_user: User = Depends(get_current_user)
 ):
     """
-    Perform full text search on documents using PostgreSQL native websearch_to_tsquery.
+    Search documents securely.
     """
-    # Simple direct string query against the tsvector column using SQLAlchemy raw text
-    # In production, we'd parameterize safely to avoid SQL injection, but websearch_to_tsquery is safe.
     query_stmt = select(Document).where(
         text("search_vector @@ websearch_to_tsquery('english', :query)")
     ).params(query=query)
     
+    if current_user.role != "Admin":
+        from app.models import Case
+        query_stmt = query_stmt.join(Case).where(Case.owning_officer_id == current_user.id)
+    
     result = await db.execute(query_stmt)
     documents = result.scalars().all()
     
-    return documents
+    return [
+        {
+            "id": str(doc.id),
+            "title": doc.title,
+            "document_type": doc.document_type,
+            "status": doc.status,
+            "case_id": str(doc.case_id)
+        }
+        for doc in documents
+    ]

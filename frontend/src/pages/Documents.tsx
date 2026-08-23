@@ -161,11 +161,17 @@ export default function Documents() {
               <Typography variant="h6">{file ? file.name : "Select or drag file"}</Typography>
               <Typography variant="body2" color="text.secondary">Support for a single PDF file.</Typography>
             </Box>
+
+            <TextField label="Case ID (UUID)" fullWidth value={caseId} onChange={(e) => setCaseId(e.target.value)} />
+            <TextField label="Document Title" fullWidth value={title} onChange={(e) => setTitle(e.target.value)} />
+            <TextField label="Document Type (e.g. FIR, Evidence)" fullWidth value={docType} onChange={(e) => setDocType(e.target.value)} />
           </Box>
         </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setOpenUpload(false)} color="inherit">Cancel</Button>
-          <Button onClick={handleUpload} variant="contained" disabled={!file}>Upload</Button>
+        <DialogActions sx={{ p: 2.5 }}>
+          <Button onClick={() => setOpen(false)} color="inherit" disabled={uploading}>Cancel</Button>
+          <Button onClick={handleUpload} variant="contained" disabled={!file || !caseId || uploading}>
+            {uploading ? <CircularProgress size={24} color="inherit" /> : 'Upload'}
+          </Button>
         </DialogActions>
       </Dialog>
     </Box>
