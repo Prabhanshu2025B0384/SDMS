@@ -16,9 +16,23 @@ import {
   DialogContent,
   DialogActions,
   Stack,
-  IconButton
+  IconButton,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow
 } from '@mui/material';
-import { SearchRounded, DescriptionRounded, DownloadRounded, VisibilityRounded, CloseRounded } from '@mui/icons-material';
+import { 
+  SearchRounded, 
+  DescriptionRounded, 
+  DownloadRounded, 
+  VisibilityRounded, 
+  CloseRounded,
+  ShieldRounded,
+  AutoAwesomeRounded
+} from '@mui/icons-material';
 import { useAuth } from '../context/AuthContext';
 
 export default function Search() {
@@ -27,6 +41,19 @@ export default function Search() {
   const [loading, setLoading] = useState(false);
   const [selectedDoc, setSelectedDoc] = useState<any | null>(null);
   const [viewLoading, setViewLoading] = useState(false);
+  
+  const [versions, setVersions] = useState<any[]>([]);
+  const [versionsLoading, setVersionsLoading] = useState(false);
+  
+  const [auditLogs, setAuditLogs] = useState<any[]>([]);
+  const [auditLoading, setAuditLoading] = useState(false);
+
+  const [integrityResult, setIntegrityResult] = useState<any | null>(null);
+  const [verifyingIntegrity, setVerifyingIntegrity] = useState(false);
+
+  const [file, setFile] = useState<File | null>(null);
+  const [uploading, setUploading] = useState(false);
+
   const { token } = useAuth();
 
   useEffect(() => {
@@ -53,14 +80,50 @@ export default function Search() {
     return () => clearTimeout(delayDebounceFn);
   }, [query, token]);
 
+  const fetchVersions = async (docId: string) => {
+    setVersionsLoading(true);
+    try {
+      const res = await fetch(`http://${window.location.hostname}:8000/documents/${docId}/versions`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.ok) {
+        setVersions(await res.json());
+      }
+    } catch (e) {
+      console.error("Failed to load versions:", e);
+    } finally {
+      setVersionsLoading(false);
+    }
+  };
+
+  const fetchAuditHistory = async (docId: string) => {
+    setAuditLoading(true);
+    try {
+      const res = await fetch(`http://${window.location.hostname}:8000/documents/${docId}/audit-history`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.ok) {
+        setAuditLogs(await res.json());
+      }
+    } catch (e) {
+      console.error("Failed to load audit history:", e);
+    } finally {
+      setAuditLoading(false);
+    }
+  };
+
   const handleViewDoc = async (docId: string) => {
     setViewLoading(true);
+    setIntegrityResult(null);
+    setFile(null);
     try {
       const res = await fetch(`http://${window.location.hostname}:8000/documents/${docId}`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       if (res.ok) {
         setSelectedDoc(await res.json());
+        fetchVersions(docId);
+        fetchAuditHistory(docId);
       }
     } catch (e) {
       console.error(e);
@@ -69,11 +132,89 @@ export default function Search() {
     }
   };
 
+  const handleVerifyIntegrity = async () => {
+    if (!selectedDoc) return;
+    setVerifyingIntegrity(true);
+    try {
+      const res = await fetch(`http://${window.location.hostname}:8000/documents/${selectedDoc.id}/verify-integrity`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setIntegrityResult(data);
+        fetchVersions(selectedDoc.id);
+        fetchAuditHistory(selectedDoc.id);
+      } else {
+        const err = await res.json();
+        alert(err.detail || 'Verification failed');
+      }
+    } catch (e) {
+      alert('Error verifying integrity');
+    } finally {
+      setVerifyingIntegrity(false);
+    }
+  };
+
+  const handleRestoreVersion = async (versionId: string) => {
+    if (!selectedDoc) return;
+    if (!window.confirm('Are you sure you want to restore this version? This will create a new current version from the selected past version.')) return;
+    try {
+      const res = await fetch(`http://${window.location.hostname}:8000/documents/${selectedDoc.id}/versions/${versionId}/restore`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.ok) {
+        alert('Version restored successfully');
+        handleViewDoc(selectedDoc.id);
+      } else {
+        const err = await res.json();
+        alert(err.detail || 'Restore failed');
+      }
+    } catch (e) {
+      alert('Error restoring version');
+    }
+  };
+
+  const handleUploadNewVersion = async () => {
+    if (!selectedDoc || !file) {
+      alert('Please select a file to upload as the new version.');
+      return;
+    }
+    setUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      
+      const res = await fetch(`http://${window.location.hostname}:8000/documents/${selectedDoc.id}/versions`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` },
+        body: formData
+      });
+      
+      if (res.ok) {
+        setFile(null);
+        alert('New version uploaded successfully.');
+        handleViewDoc(selectedDoc.id);
+      } else {
+        const err = await res.json();
+        alert(err.detail || 'Upload new version failed');
+      }
+    } catch (e) {
+      alert('Error uploading new version');
+    } finally {
+      setUploading(false);
+    }
+  };
+
   const handleDownload = (docId: string, title: string) => {
     fetch(`http://${window.location.hostname}:8000/documents/${docId}/download`, {
       headers: { 'Authorization': `Bearer ${token}` }
     })
-    .then(res => res.blob())
+    .then(res => {
+      if (!res.ok) throw new Error('Download failed. You may not be authorized.');
+      return res.blob();
+    })
     .then(blob => {
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -83,7 +224,7 @@ export default function Search() {
       a.click();
       a.remove();
     })
-    .catch(err => alert("Download failed: " + err));
+    .catch(err => alert("Download failed: " + err.message));
   };
 
   return (
@@ -171,7 +312,10 @@ export default function Search() {
       {/* Document Details Modal */}
       <Dialog open={Boolean(selectedDoc)} onClose={() => setSelectedDoc(null)} maxWidth="md" fullWidth>
         <DialogTitle sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <Typography variant="h6" sx={{ fontWeight: 700 }}>{selectedDoc?.title}</Typography>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <AutoAwesomeRounded color="primary" />
+            <Typography variant="h6" sx={{ fontWeight: 700 }}>{selectedDoc?.title}</Typography>
+          </Box>
           <IconButton onClick={() => setSelectedDoc(null)} size="small"><CloseRounded /></IconButton>
         </DialogTitle>
         <DialogContent dividers>
@@ -179,14 +323,15 @@ export default function Search() {
             <Stack spacing={3}>
               <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
                 <Chip label={`Type: ${selectedDoc.document_type}`} color="primary" variant="outlined" />
-                <Chip label={`Status: ${selectedDoc.status}`} color={selectedDoc.status === 'READY' ? 'success' : 'warning'} />
+                <Chip label={`Status: ${selectedDoc.status}`} color={selectedDoc.status === 'READY' ? 'success' : selectedDoc.status === 'PROCESSING_FAILED' ? 'error' : 'warning'} />
                 <Chip label={`Version: ${selectedDoc.version_number || '1.0'}`} variant="outlined" />
               </Box>
 
+              {/* AI Metadata */}
               {selectedDoc.structured_data && Object.keys(selectedDoc.structured_data).length > 0 && (
-                <Card sx={{ p: 2.5, bgcolor: 'background.default' }}>
-                  <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1.5, color: 'primary.main' }}>
-                    AI-Extracted Structured Metadata
+                <Card sx={{ p: 2.5, bgcolor: 'background.default', border: '1px solid', borderColor: 'divider' }}>
+                  <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1.5, color: 'primary.main', display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <AutoAwesomeRounded sx={{ fontSize: 18 }} /> AI-Extracted Structured Metadata
                   </Typography>
                   <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, gap: 1.5 }}>
                     <Typography variant="body2"><strong>FIR / Case No:</strong> {selectedDoc.structured_data.fir_number || 'N/A'}</Typography>
@@ -194,23 +339,123 @@ export default function Search() {
                     <Typography variant="body2"><strong>Police Station:</strong> {selectedDoc.structured_data.police_station || 'N/A'}</Typography>
                     <Typography variant="body2"><strong>Complainant:</strong> {selectedDoc.structured_data.complainant || 'N/A'}</Typography>
                     <Typography variant="body2"><strong>Accused:</strong> {selectedDoc.structured_data.accused || 'N/A'}</Typography>
-                    <Typography variant="body2"><strong>IPC Sections:</strong> {Array.isArray(selectedDoc.structured_data.ipc_sections) ? selectedDoc.structured_data.ipc_sections.join(', ') : selectedDoc.structured_data.ipc_sections || 'N/A'}</Typography>
+                    <Typography variant="body2">
+                      <strong>IPC Sections:</strong> {Array.isArray(selectedDoc.structured_data.ipc_sections) ? selectedDoc.structured_data.ipc_sections.join(', ') : selectedDoc.structured_data.ipc_sections || 'N/A'}
+                    </Typography>
                   </Box>
                 </Card>
               )}
 
+              {/* OCR Text */}
               <Box>
                 <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>Extracted Document Text</Typography>
-                <Box sx={{ p: 2, bgcolor: 'background.default', borderRadius: 1.5, maxHeight: 240, overflowY: 'auto', fontFamily: 'monospace', fontSize: 13, whiteSpace: 'pre-wrap' }}>
+                <Box sx={{ p: 2, bgcolor: 'background.default', borderRadius: 1.5, maxHeight: 240, overflowY: 'auto', fontFamily: 'monospace', fontSize: 13, whiteSpace: 'pre-wrap', border: '1px solid', borderColor: 'divider' }}>
                   {selectedDoc.raw_ocr_text || 'No text extracted.'}
                 </Box>
               </Box>
 
-              {selectedDoc.file_hash && (
-                <Typography variant="caption" color="text.secondary" sx={{ fontFamily: 'monospace' }}>
-                  SHA-256 Hash: {selectedDoc.file_hash}
-                </Typography>
-              )}
+              {/* Integrity */}
+              <Box>
+                <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>Integrity</Typography>
+                <Card sx={{ p: 2, bgcolor: 'background.default', border: '1px solid', borderColor: 'divider' }}>
+                  <Typography variant="caption" color="text.secondary" sx={{ fontFamily: 'monospace', display: 'block', mb: 1 }}>
+                    SHA-256 Hash: {selectedDoc.file_hash || 'N/A'}
+                  </Typography>
+                  
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mt: 1 }}>
+                    <Button 
+                      variant="outlined" 
+                      size="small" 
+                      color="info" 
+                      onClick={handleVerifyIntegrity} 
+                      disabled={verifyingIntegrity || !selectedDoc.file_hash}
+                      startIcon={<ShieldRounded />}
+                    >
+                      {verifyingIntegrity ? 'Verifying...' : 'Verify Integrity'}
+                    </Button>
+                    
+                    {integrityResult && (
+                      <Typography variant="body2" color={integrityResult.status === 'VERIFIED' ? 'success.main' : 'error.main'} sx={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                        {integrityResult.status === 'VERIFIED' ? '✓ Document Integrity Verified' : '✗ Integrity Check Failed'}
+                      </Typography>
+                    )}
+                  </Box>
+                </Card>
+              </Box>
+
+              {/* Version History Box */}
+              <Box>
+                <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>Version History</Typography>
+                {versionsLoading ? <CircularProgress size={20} /> : (
+                  <TableContainer component={Card} variant="outlined" sx={{ mb: 2 }}>
+                    <Table size="small">
+                      <TableHead>
+                        <TableRow>
+                          <TableCell>Version</TableCell>
+                          <TableCell>Date</TableCell>
+                          <TableCell>Uploaded By</TableCell>
+                          <TableCell>Integrity</TableCell>
+                          <TableCell>Action</TableCell>
+                        </TableRow>
+                      </TableHead>
+                      <TableBody>
+                        {versions.map(v => (
+                          <TableRow key={v.id}>
+                            <TableCell>{v.version_number} {v.is_current && <Chip label="CURRENT" size="small" color="primary" sx={{ ml: 1, height: 20 }} />}</TableCell>
+                            <TableCell>{v.created_at ? new Date(v.created_at).toLocaleString() : 'Unknown'}</TableCell>
+                            <TableCell>{v.created_by}</TableCell>
+                            <TableCell>{v.is_tampered ? <Chip label="Tampered" color="error" size="small" sx={{ height: 20 }} /> : <Chip label="✓ Verified" color="success" size="small" sx={{ height: 20 }} />}</TableCell>
+                            <TableCell>
+                              {!v.is_current && selectedDoc.status !== 'LOCKED' && (
+                                <Button size="small" onClick={() => handleRestoreVersion(v.id)}>RESTORE</Button>
+                              )}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </TableContainer>
+                )}
+                
+                {selectedDoc.status !== 'LOCKED' && selectedDoc.status !== 'PROCESSING' && (
+                   <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+                     <input type="file" accept="application/pdf" onChange={(e) => setFile(e.target.files?.[0] || null)} />
+                     <Button size="small" variant="contained" onClick={handleUploadNewVersion} disabled={!file || uploading}>
+                       {uploading ? <CircularProgress size={20} /> : 'Upload New Version'}
+                     </Button>
+                   </Box>
+                )}
+              </Box>
+
+              {/* Audit History Box */}
+              <Box>
+                <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>Audit History</Typography>
+                {auditLoading ? <CircularProgress size={20} /> : (
+                  <TableContainer component={Card} variant="outlined" sx={{ mb: 2 }}>
+                    <Table size="small">
+                      <TableHead>
+                        <TableRow>
+                          <TableCell>Timestamp</TableCell>
+                          <TableCell>User</TableCell>
+                          <TableCell>Action</TableCell>
+                          <TableCell>Version</TableCell>
+                        </TableRow>
+                      </TableHead>
+                      <TableBody>
+                        {auditLogs.map(log => (
+                          <TableRow key={log.id}>
+                            <TableCell>{new Date(log.timestamp).toLocaleString()}</TableCell>
+                            <TableCell>{log.user_email}</TableCell>
+                            <TableCell>{log.action}</TableCell>
+                            <TableCell>{log.details?.version_number || '-'}</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </TableContainer>
+                )}
+              </Box>
+
             </Stack>
           )}
         </DialogContent>
@@ -218,7 +463,7 @@ export default function Search() {
           <Button onClick={() => setSelectedDoc(null)} color="inherit">Close</Button>
           {selectedDoc && (
             <Button variant="contained" startIcon={<DownloadRounded />} onClick={() => handleDownload(selectedDoc.id, selectedDoc.title)}>
-              Download PDF
+              Download Current PDF
             </Button>
           )}
         </DialogActions>

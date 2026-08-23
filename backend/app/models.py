@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import JSON, Boolean, Column, DateTime, ForeignKey, Index, Integer, String, Text, TypeDecorator
+from sqlalchemy import JSON, Boolean, Column, DateTime, ForeignKey, Index, Integer, String, Text, TypeDecorator, func
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID, TSVECTOR
 from sqlalchemy.orm import relationship
 
@@ -121,6 +121,7 @@ class DocumentVersion(Base):
 
     document = relationship("Document", back_populates="versions")
     created_by = Column(GUID, ForeignKey("users.id"), nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, server_default=func.now())
 
 
 class AuditLog(Base):

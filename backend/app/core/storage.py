@@ -1,84 +1,54 @@
 import os
 from pathlib import Path
-import boto3
-from botocore.client import Config
+from supabase import create_client, Client, ClientOptions
 
 from app.core.config import settings
 
 
+def get_supabase_client() -> Client:
+    if not settings.SUPABASE_URL or not settings.SUPABASE_SERVICE_KEY:
+        raise ValueError("Supabase configuration is missing.")
+    options = ClientOptions(auto_refresh_token=False, persist_session=False)
+    return create_client(settings.SUPABASE_URL, settings.SUPABASE_SERVICE_KEY, options=options)
+
+
 def ensure_storage_ready():
     """
-    Ensures local storage directory exists, and optionally S3 bucket if configured.
+    Ensures Supabase client can be initialized.
     """
-    # Always ensure local storage dir exists
-    Path(settings.STORAGE_LOCAL_DIR).mkdir(parents=True, exist_ok=True)
-    
-    if settings.STORAGE_TYPE == "s3":
-        try:
-            client = get_storage_client()
-            client.head_bucket(Bucket=settings.CEPH_BUCKET_NAME)
-        except Exception:
-            try:
-                client = get_storage_client()
-                client.create_bucket(Bucket=settings.CEPH_BUCKET_NAME)
-            except Exception as e:
-                print(f"Warning: S3 bucket setup failed, will fallback to local storage: {e}")
-
-
-def get_storage_client():
-    """
-    Returns an S3-compatible client for Ceph or MinIO.
-    """
-    return boto3.client(
-        's3',
-        endpoint_url=settings.CEPH_ENDPOINT_URL,
-        aws_access_key_id=settings.CEPH_ACCESS_KEY,
-        aws_secret_access_key=settings.CEPH_SECRET_KEY,
-        config=Config(signature_version='s3v4'),
-        region_name='us-east-1'
-    )
+    try:
+        get_supabase_client()
+    except Exception as e:
+        print(f"Warning: Supabase client initialization failed: {e}")
 
 
 def save_storage_file(storage_path: str, data: bytes) -> str:
     """
-    Saves file to local disk and/or S3.
+    Saves file to Supabase Storage bucket.
     """
-    # 1. Local filesystem storage
-    local_full_path = Path(settings.STORAGE_LOCAL_DIR) / storage_path
-    local_full_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(local_full_path, "wb") as f:
-        f.write(data)
+    client = get_supabase_client()
+    try:
+        # Use upsert to handle retries without failing
+        client.storage.from_(settings.SUPABASE_STORAGE_BUCKET).upload(
+            path=storage_path,
+            file=data,
+            file_options={"content-type": "application/pdf", "upsert": "true"}
+        )
+    except Exception as e:
+        raise Exception(f"Failed to upload document to Supabase Storage: {e}")
 
-    # 2. Optionally mirror to S3 if configured
-    if settings.STORAGE_TYPE == "s3":
-        try:
-            s3 = get_storage_client()
-            s3.put_object(
-                Bucket=settings.CEPH_BUCKET_NAME,
-                Key=storage_path,
-                Body=data,
-                ContentType='application/pdf'
-            )
-        except Exception as e:
-            print(f"Warning: S3 put_object failed ({e}), saved to local storage at {local_full_path}")
-
-    return str(local_full_path)
+    return storage_path
 
 
 def get_storage_file(storage_path: str) -> bytes:
     """
-    Retrieves file bytes from local disk or S3.
+    Retrieves file bytes from Supabase Storage bucket.
     """
-    local_full_path = Path(settings.STORAGE_LOCAL_DIR) / storage_path
-    if local_full_path.exists():
-        with open(local_full_path, "rb") as f:
-            return f.read()
-
-    # Fallback to S3 if not found locally
+    client = get_supabase_client()
     try:
-        s3 = get_storage_client()
-        obj = s3.get_object(Bucket=settings.CEPH_BUCKET_NAME, Key=storage_path)
-        return obj['Body'].read()
+        response = client.storage.from_(settings.SUPABASE_STORAGE_BUCKET).download(storage_path)
+        return response
     except Exception as e:
         raise FileNotFoundError(f"Document file not found at {storage_path}: {e}")
+
 
