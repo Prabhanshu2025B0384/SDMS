@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Routes, Route, Link, useLocation, Navigate } from 'react-router-dom';
 import Documents from './pages/Documents';
 import Search from './pages/Search';
@@ -30,7 +31,7 @@ import {
 
 const DRAWER_WIDTH = 280;
 
-function Sidebar() {
+function Sidebar({ mobileOpen, onClose }: { mobileOpen: boolean; onClose: () => void }) {
   const location = useLocation();
   const { user, logout } = useAuth();
   
@@ -43,101 +44,115 @@ function Sidebar() {
     menuItems.push({ title: 'Admin Panel', path: '/admin', icon: <AdminPanelSettingsRounded /> });
   }
 
+  const drawerContent = (
+    <>
+      <Box sx={{ p: 3, display: 'flex', alignItems: 'center' }}>
+        <Box sx={{ 
+          width: 32, height: 32, mr: 1.5, 
+          bgcolor: 'primary.main', 
+          borderRadius: 1,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          color: 'white', fontWeight: 800, fontSize: 16
+        }}>
+          S
+        </Box>
+        <Typography variant="h6" fontWeight="700" color="text.primary">Secure DMS</Typography>
+      </Box>
+      
+      <Box sx={{ px: 2, pb: 2 }}>
+        <Box sx={{ p: 2, borderRadius: 2, bgcolor: 'rgba(145, 158, 171, 0.12)', display: 'flex', alignItems: 'center', mb: 3 }}>
+          <Avatar sx={{ width: 40, height: 40, mr: 2 }} />
+          <Box>
+            <Typography variant="subtitle2" sx={{ overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 140 }}>
+              {user?.email.split('@')[0]}
+            </Typography>
+            <Typography variant="body2" color="text.secondary">{user?.role}</Typography>
+          </Box>
+        </Box>
+      </Box>
+
+      <List sx={{ px: 2, flexGrow: 1 }}>
+        {menuItems.map((item) => {
+          const active = location.pathname === item.path;
+          return (
+            <ListItem key={item.title} disablePadding sx={{ mb: 1 }}>
+              <ListItemButton
+                component={Link}
+                to={item.path}
+                onClick={onClose}
+                sx={{
+                  borderRadius: 2,
+                  color: active ? 'primary.main' : 'text.secondary',
+                  bgcolor: active ? 'rgba(0, 167, 111, 0.08)' : 'transparent',
+                  '&:hover': {
+                    bgcolor: active ? 'rgba(0, 167, 111, 0.16)' : 'rgba(145, 158, 171, 0.08)',
+                  }
+                }}
+              >
+                <ListItemIcon sx={{ color: 'inherit', minWidth: 40 }}>{item.icon}</ListItemIcon>
+                <ListItemText 
+                  disableTypography
+                  primary={<Typography variant="body2" sx={{ fontWeight: active ? 600 : 500 }}>{item.title}</Typography>} 
+                />
+              </ListItemButton>
+            </ListItem>
+          );
+        })}
+      </List>
+
+      <Box sx={{ p: 2 }}>
+        <Button fullWidth color="error" startIcon={<LogoutRounded />} onClick={logout}>
+          Logout
+        </Button>
+      </Box>
+    </>
+  );
+
   return (
-    <Box sx={{ width: DRAWER_WIDTH, flexShrink: 0 }}>
+    <Box sx={{ width: { md: DRAWER_WIDTH }, flexShrink: { md: 0 } }}>
+      {/* Mobile Drawer */}
+      <Drawer
+        variant="temporary"
+        open={mobileOpen}
+        onClose={onClose}
+        ModalProps={{ keepMounted: true }} // Better open performance on mobile.
+        sx={{
+          display: { xs: 'block', md: 'none' },
+          '& .MuiDrawer-paper': { boxSizing: 'border-box', width: DRAWER_WIDTH, backgroundColor: 'background.default' },
+        }}
+      >
+        {drawerContent}
+      </Drawer>
+      {/* Desktop Drawer */}
       <Drawer
         variant="permanent"
         sx={{
-          '& .MuiDrawer-paper': {
-            width: DRAWER_WIDTH,
-            boxSizing: 'border-box',
-            borderRight: '1px dashed rgba(145, 158, 171, 0.24)',
-            backgroundColor: 'background.default',
-          },
+          display: { xs: 'none', md: 'block' },
+          '& .MuiDrawer-paper': { width: DRAWER_WIDTH, boxSizing: 'border-box', borderRight: '1px dashed rgba(145, 158, 171, 0.24)', backgroundColor: 'background.default' },
         }}
+        open
       >
-        <Box sx={{ p: 3, display: 'flex', alignItems: 'center' }}>
-          <Box
-            component="img"
-            src="/vite.svg"
-            sx={{ width: 40, height: 40, mr: 2 }}
-          />
-          <Typography variant="h6" fontWeight="700" color="primary.main">
-            Secure DMS
-          </Typography>
-        </Box>
-        
-        <Box sx={{ px: 2, pb: 2 }}>
-          <Box sx={{ p: 2, borderRadius: 2, bgcolor: 'rgba(145, 158, 171, 0.12)', display: 'flex', alignItems: 'center', mb: 3 }}>
-            <Avatar sx={{ width: 40, height: 40, mr: 2 }} />
-            <Box>
-              <Typography variant="subtitle2" sx={{ overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 140 }}>
-                {user?.email.split('@')[0]}
-              </Typography>
-              <Typography variant="body2" color="text.secondary">{user?.role}</Typography>
-            </Box>
-          </Box>
-        </Box>
-
-        <List sx={{ px: 2, flexGrow: 1 }}>
-          {menuItems.map((item) => {
-            const active = location.pathname === item.path;
-            return (
-              <ListItem key={item.title} disablePadding sx={{ mb: 1 }}>
-                <ListItemButton
-                  component={Link}
-                  to={item.path}
-                  sx={{
-                    borderRadius: 2,
-                    color: active ? 'primary.main' : 'text.secondary',
-                    bgcolor: active ? 'rgba(0, 167, 111, 0.08)' : 'transparent',
-                    '&:hover': {
-                      bgcolor: active ? 'rgba(0, 167, 111, 0.16)' : 'rgba(145, 158, 171, 0.08)',
-                    }
-                  }}
-                >
-                  <ListItemIcon sx={{ color: 'inherit', minWidth: 40 }}>
-                    {item.icon}
-                  </ListItemIcon>
-                  <ListItemText 
-                    disableTypography
-                    primary={
-                      <Typography variant="body2" sx={{ fontWeight: active ? 600 : 500 }}>
-                        {item.title}
-                      </Typography>
-                    } 
-                  />
-                </ListItemButton>
-              </ListItem>
-            );
-          })}
-        </List>
-
-        <Box sx={{ p: 2 }}>
-          <Button 
-            fullWidth 
-            color="error" 
-            startIcon={<LogoutRounded />} 
-            onClick={logout}
-          >
-            Logout
-          </Button>
-        </Box>
+        {drawerContent}
       </Drawer>
     </Box>
   );
 }
 
-function Topbar() {
+function Topbar({ onMenuClick }: { onMenuClick: () => void }) {
   return (
-    <AppBar position="fixed" sx={{ width: `calc(100% - ${DRAWER_WIDTH}px)`, ml: `${DRAWER_WIDTH}px` }}>
-      <Toolbar sx={{ justifyContent: 'flex-end', minHeight: 80 }}>
-        <IconButton sx={{ color: 'text.secondary' }}>
-          <SearchRounded />
+    <AppBar position="fixed" sx={{ width: { md: `calc(100% - ${DRAWER_WIDTH}px)` }, ml: { md: `${DRAWER_WIDTH}px` } }}>
+      <Toolbar sx={{ minHeight: 80, px: { xs: 2, md: 5 } }}>
+        <IconButton
+          color="inherit"
+          edge="start"
+          onClick={onMenuClick}
+          sx={{ mr: 2, display: { md: 'none' }, color: 'text.primary' }}
+        >
+          <Box component="span" sx={{ fontSize: 24 }}>☰</Box>
         </IconButton>
-        <IconButton sx={{ color: 'text.secondary', ml: 1 }}>
-          <NotificationsRounded />
-        </IconButton>
+        <Box sx={{ flexGrow: 1 }} />
+        <IconButton sx={{ color: 'text.secondary' }}><SearchRounded /></IconButton>
+        <IconButton sx={{ color: 'text.secondary', ml: 1 }}><NotificationsRounded /></IconButton>
         <Avatar sx={{ ml: 2, width: 40, height: 40 }} />
       </Toolbar>
     </AppBar>
@@ -145,11 +160,14 @@ function Topbar() {
 }
 
 function AuthenticatedLayout() {
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const handleDrawerToggle = () => setMobileOpen(!mobileOpen);
+
   return (
-    <Box sx={{ display: 'flex', minHeight: '100vh' }}>
-      <Sidebar />
-      <Topbar />
-      <Box component="main" sx={{ flexGrow: 1, p: 3, pt: 12, bgcolor: '#ffffff' }}>
+    <Box sx={{ display: 'flex', minHeight: '100vh', width: '100%' }}>
+      <Sidebar mobileOpen={mobileOpen} onClose={() => setMobileOpen(false)} />
+      <Topbar onMenuClick={handleDrawerToggle} />
+      <Box component="main" sx={{ flexGrow: 1, p: { xs: 2, md: 3 }, pt: { xs: 10, md: 12 }, width: { xs: '100%', md: `calc(100% - ${DRAWER_WIDTH}px)` } }}>
         <Routes>
           <Route element={<ProtectedRoute />}>
             <Route path="/documents" element={<Documents />} />

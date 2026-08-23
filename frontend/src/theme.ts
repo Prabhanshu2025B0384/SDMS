@@ -37,35 +37,81 @@ export const theme = createTheme({
       default: grey[100],
     },
     divider: alpha(grey[500], 0.2),
+    action: {
+      hover: alpha(grey[500], 0.08),
+      selected: alpha(grey[500], 0.16),
+      disabled: alpha(grey[500], 0.8),
+      disabledBackground: alpha(grey[500], 0.24),
+      focus: alpha(grey[500], 0.24),
+      hoverOpacity: 0.08,
+      disabledOpacity: 0.48,
+    },
   },
   typography: {
-    fontFamily: '"Public Sans", sans-serif',
-    h1: { fontWeight: 800 },
-    h2: { fontWeight: 800 },
-    h3: { fontWeight: 700 },
-    h4: { fontWeight: 700 },
-    h5: { fontWeight: 700 },
-    h6: { fontWeight: 700 },
-    subtitle1: { fontWeight: 600 },
-    subtitle2: { fontWeight: 600 },
-    body1: { fontWeight: 400 },
-    body2: { fontWeight: 400 },
-    button: { fontWeight: 700, textTransform: 'none' },
+    fontFamily: '"Public Sans", "Inter", "Roboto", "Helvetica", "Arial", sans-serif',
+    fontWeightRegular: 400,
+    fontWeightMedium: 500,
+    fontWeightBold: 700,
+    h1: { fontWeight: 800, lineHeight: 80 / 64, fontSize: '4rem' },
+    h2: { fontWeight: 800, lineHeight: 64 / 48, fontSize: '3rem' },
+    h3: { fontWeight: 700, lineHeight: 1.5, fontSize: '2rem' },
+    h4: { fontWeight: 700, lineHeight: 1.5, fontSize: '1.5rem' },
+    h5: { fontWeight: 700, lineHeight: 1.5, fontSize: '1.25rem' },
+    h6: { fontWeight: 700, lineHeight: 28 / 18, fontSize: '1.125rem' },
+    subtitle1: { fontWeight: 600, lineHeight: 1.5, fontSize: '1rem' },
+    subtitle2: { fontWeight: 600, lineHeight: 22 / 14, fontSize: '0.875rem' },
+    body1: { lineHeight: 1.5, fontSize: '1rem' },
+    body2: { lineHeight: 22 / 14, fontSize: '0.875rem' },
+    button: { fontWeight: 700, lineHeight: 24 / 14, fontSize: '0.875rem', textTransform: 'none' },
   },
   shape: {
     borderRadius: 8,
   },
   components: {
+    MuiCssBaseline: {
+      styleOverrides: {
+        '*': {
+          boxSizing: 'border-box',
+        },
+        html: {
+          margin: 0,
+          padding: 0,
+          width: '100%',
+          height: '100%',
+          WebkitOverflowScrolling: 'touch',
+        },
+        body: {
+          margin: 0,
+          padding: 0,
+          width: '100%',
+          height: '100%',
+          backgroundColor: grey[100],
+        },
+        '#root': {
+          width: '100%',
+          height: '100%',
+        },
+      },
+    },
     MuiButton: {
       styleOverrides: {
         root: {
           borderRadius: 8,
           padding: '8px 16px',
         },
+        sizeLarge: {
+          height: 48,
+        },
         containedPrimary: {
           boxShadow: `0 8px 16px 0 ${alpha(primary.main, 0.24)}`,
           '&:hover': {
-            boxShadow: 'none',
+            boxShadow: `0 8px 16px 0 ${alpha(primary.main, 0.24)}`,
+          },
+        },
+        containedError: {
+          boxShadow: `0 8px 16px 0 ${alpha('#FF5630', 0.24)}`,
+          '&:hover': {
+            boxShadow: `0 8px 16px 0 ${alpha('#FF5630', 0.24)}`,
           },
         },
       },
@@ -96,6 +142,52 @@ export const theme = createTheme({
           backdropFilter: 'blur(6px)',
           boxShadow: 'none',
           color: grey[800],
+        },
+      },
+    },
+    MuiDrawer: {
+      styleOverrides: {
+        paper: {
+          borderRight: `1px dashed ${alpha(grey[500], 0.24)}`,
+          backgroundColor: grey[100],
+        },
+      },
+    },
+    MuiOutlinedInput: {
+      styleOverrides: {
+        root: {
+          borderRadius: 8,
+          '& .MuiOutlinedInput-notchedOutline': {
+            borderColor: alpha(grey[500], 0.32),
+          },
+          '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
+            borderWidth: 1,
+            borderColor: grey[800],
+          },
+        },
+      },
+    },
+    MuiDialog: {
+      styleOverrides: {
+        paper: {
+          borderRadius: 16,
+          boxShadow: `0 0 2px 0 ${alpha(grey[500], 0.2)}, 0 24px 48px -12px ${alpha(grey[500], 0.24)}`,
+        },
+      },
+    },
+    MuiDialogTitle: {
+      styleOverrides: {
+        root: {
+          fontWeight: 700,
+        },
+      },
+    },
+    MuiTableCell: {
+      styleOverrides: {
+        head: {
+          color: grey[600],
+          backgroundColor: alpha(grey[500], 0.12),
+          fontWeight: 600,
         },
       },
     },

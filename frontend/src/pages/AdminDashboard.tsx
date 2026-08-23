@@ -19,7 +19,9 @@ import {
   DialogTitle,
   DialogContent,
   DialogActions,
-  TextField
+  TextField,
+  Stack,
+  Breadcrumbs
 } from '@mui/material';
 import { DeleteRounded, EditRounded, VerifiedUserRounded, AdminPanelSettingsRounded } from '@mui/icons-material';
 import { useAuth } from '../context/AuthContext';
@@ -110,9 +112,17 @@ export default function AdminDashboard() {
 
   return (
     <Box>
-      <Box sx={{ display: 'flex', alignItems: 'center', mb: 5 }}>
-        <AdminPanelSettingsRounded color="error" sx={{ fontSize: 40, mr: 2 }} />
-        <Typography variant="h4">System Administration</Typography>
+      <Box sx={{ display: 'flex', alignItems: { xs: 'flex-start', sm: 'center' }, justifyContent: 'space-between', mb: 5, width: '100%', position: 'relative', flexDirection: { xs: 'column', sm: 'row' }, gap: { xs: 2, sm: 0 } }}>
+        <Box>
+          <Typography variant="h4" gutterBottom>
+            System Administration
+          </Typography>
+          <Breadcrumbs aria-label="breadcrumb">
+            <Typography variant="body2" color="text.secondary">Dashboard</Typography>
+            <Typography variant="body2" color="text.secondary">Admin</Typography>
+          </Breadcrumbs>
+        </Box>
+        <AdminPanelSettingsRounded color="error" sx={{ fontSize: 48, opacity: 0.2, position: 'absolute', right: 40, top: 10 }} />
       </Box>
 
       <Card sx={{ p: 2 }}>
@@ -136,7 +146,7 @@ export default function AdminDashboard() {
               </Box>
               <TableContainer>
                 <Table>
-                  <TableHead sx={{ bgcolor: 'background.default' }}>
+                  <TableHead>
                     <TableRow>
                       <TableCell>Email</TableCell>
                       <TableCell>Role</TableCell>
@@ -204,7 +214,7 @@ export default function AdminDashboard() {
               </Typography>
               <TableContainer>
                 <Table>
-                  <TableHead sx={{ bgcolor: 'background.default' }}>
+                  <TableHead>
                     <TableRow>
                       <TableCell>Case ID</TableCell>
                       <TableCell>Status</TableCell>
@@ -230,7 +240,7 @@ export default function AdminDashboard() {
             <TabPanel value={tabValue} index={2}>
               <TableContainer>
                 <Table>
-                  <TableHead sx={{ bgcolor: 'background.default' }}>
+                  <TableHead>
                     <TableRow>
                       <TableCell>Timestamp</TableCell>
                       <TableCell>Action</TableCell>
