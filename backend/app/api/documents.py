@@ -35,19 +35,16 @@ async def log_document_action(
     result: str = "SUCCESS",
     details: dict = None
 ):
-    """Helper to log document-level audit events (VIEW, DOWNLOAD, SHARE, etc.)."""
-    audit = AuditLog(
-        id=uuid.uuid4(),
-        timestamp=datetime.utcnow(),
-        user_id=user_id,
+    from app.core.audit import log_audit_event
+    await log_audit_event(
+        db=db,
         action=action,
+        user_id=user_id,
         document_id=document_id,
         case_id=case_id,
         result=result,
-        details=details or {},
-        current_hash=f"{action}_{str(document_id)}_{str(user_id)}_{datetime.utcnow().timestamp()}"
+        details=details or {}
     )
-    db.add(audit)
     await db.commit()
 
 
@@ -92,7 +89,8 @@ async def process_document_background(
                 doc_result = await session.execute(select(Document).where(Document.id == document_id))
                 doc = doc_result.scalar_one_or_none()
                 if doc:
-                    doc.status = "READY"
+                    doc.status = "PROCESSING_FAILED"
+                    doc.failure_reason = str(e)
                     await session.commit()
         except Exception as inner_e:
             print(f"Failed to update document status: {inner_e}")
@@ -111,20 +109,14 @@ async def get_documents(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    if current_user.role == "Admin":
-        query = select(Document).order_by(Document.created_at.desc())
-    else:
-        from app.models import CaseAssignment, DocumentPermission
-        from sqlalchemy import or_
-        assigned_case_ids_subquery = select(CaseAssignment.case_id).where(CaseAssignment.user_id == current_user.id)
-        explicitly_shared_doc_ids = select(DocumentPermission.document_id).where(DocumentPermission.user_id == current_user.id)
-        query = select(Document).join(Case).where(
-            or_(
-                Case.owning_officer_id == current_user.id,
-                Document.case_id.in_(assigned_case_ids_subquery),
-                Document.id.in_(explicitly_shared_doc_ids)
-            )
-        ).order_by(Document.created_at.desc())
+    query = select(Document).join(Case, Document.case_id == Case.id)
+    
+    from app.core.authorization import get_authorized_document_filter
+    auth_filter = get_authorized_document_filter(current_user)
+    if auth_filter is not True:
+        query = query.where(auth_filter)
+        
+    query = query.order_by(Document.created_at.desc())
 
     result = await db.execute(query)
     docs = result.scalars().all()
@@ -428,17 +420,15 @@ async def upload_document(
     )
 
     # Audit Log
-    audit = AuditLog(
-        id=uuid.uuid4(),
-        user_id=current_user.id,
+    from app.core.audit import log_audit_event
+    await log_audit_event(
+        db=db,
         action="UPLOAD",
+        user_id=current_user.id,
         document_id=new_doc.id,
         case_id=case.id,
-        result="SUCCESS",
-        details={"title": title, "classification_level": classification_level, "user_email": current_user.email},
-        current_hash=file_hash
+        details={"title": title, "classification_level": classification_level, "user_email": current_user.email}
     )
-    db.add(audit)
     await db.commit()
 
     return {
@@ -446,3 +436,343 @@ async def upload_document(
         "document_id": str(new_doc.id),
         "status": "PROCESSING"
     }
+
+
+# ─── VERSIONS ────────────────────────────────────────────────────────────────
+
+@router.post("/{document_id}/versions")
+async def create_document_version(
+    background_tasks: BackgroundTasks,
+    document_id: str,
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    if not file.filename.lower().endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="Only PDF files are supported")
+        
+    result = await db.execute(select(Document).where(Document.id == document_id))
+    doc = result.scalar_one_or_none()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+        
+    from app.core.authorization import check_document_access
+    await check_document_access(db, doc, current_user, required_action="EDIT")
+    
+    if doc.status in ["LOCKED", "PROCESSING"]:
+        raise HTTPException(status_code=400, detail=f"Cannot edit document in status: {doc.status}")
+        
+    # Get current latest version number
+    ver_result = await db.execute(
+        select(DocumentVersion).where(DocumentVersion.document_id == document_id).order_by(DocumentVersion.created_at.desc())
+    )
+    versions = ver_result.scalars().all()
+    latest_version_num = float(versions[0].version_number) if versions else 0.0
+    new_version_num = f"{latest_version_num + 1.0:.1f}"
+    
+    file_bytes = await file.read()
+    file_hash = calculate_sha256(file_bytes)
+    
+    storage_path = f"{doc.case_id}/{doc.id}/{new_version_num}.pdf"
+    try:
+        save_storage_file(storage_path, file_bytes)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to store file: {e}")
+        
+    new_version_id = uuid.uuid4()
+    new_version = DocumentVersion(
+        id=new_version_id,
+        document_id=doc.id,
+        version_number=new_version_num,
+        storage_path=storage_path,
+        file_hash=file_hash,
+        created_by=current_user.id
+    )
+    db.add(new_version)
+    
+    doc.current_version_id = new_version.id
+    doc.status = "PROCESSING"
+    await db.commit()
+    await db.refresh(new_version)
+    
+    background_tasks.add_task(
+        process_document_background,
+        document_id=str(doc.id),
+        version_id=str(new_version.id),
+        file_bytes=file_bytes,
+        user_id=str(current_user.id)
+    )
+    
+    await log_document_action(db, current_user.id, "VERSION_CREATED", doc.id, doc.case_id,
+                              details={"new_version": new_version_num, "user_email": current_user.email})
+                              
+    return {"message": "New version created successfully", "version_id": str(new_version.id), "status": "PROCESSING"}
+
+
+@router.get("/{document_id}/versions")
+async def get_document_versions(
+    document_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    result = await db.execute(select(Document).where(Document.id == document_id))
+    doc = result.scalar_one_or_none()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+        
+    from app.core.authorization import check_document_access
+    await check_document_access(db, doc, current_user, required_action="VIEW")
+    
+    ver_result = await db.execute(
+        select(DocumentVersion).where(DocumentVersion.document_id == document_id).order_by(DocumentVersion.created_at.desc())
+    )
+    versions = ver_result.scalars().all()
+    
+    users_result = await db.execute(select(User))
+    users_map = {str(u.id): u.email for u in users_result.scalars().all()}
+    
+    return [
+        {
+            "id": str(v.id),
+            "version_number": v.version_number,
+            "created_at": v.created_at.isoformat() if v.created_at else None,
+            "created_by": users_map.get(str(v.created_by), "Unknown"),
+            "file_hash": v.file_hash,
+            "is_tampered": v.is_tampered,
+            "is_current": str(v.id) == str(doc.current_version_id)
+        }
+        for v in versions
+    ]
+
+
+@router.post("/{document_id}/versions/{version_id}/restore")
+async def restore_document_version(
+    background_tasks: BackgroundTasks,
+    document_id: str,
+    version_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    result = await db.execute(select(Document).where(Document.id == document_id))
+    doc = result.scalar_one_or_none()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+        
+    from app.core.authorization import check_document_access
+    await check_document_access(db, doc, current_user, required_action="EDIT")
+    
+    if doc.status in ["LOCKED", "PROCESSING"]:
+        raise HTTPException(status_code=400, detail=f"Cannot edit document in status: {doc.status}")
+        
+    ver_result = await db.execute(select(DocumentVersion).where(DocumentVersion.id == version_id))
+    old_version = ver_result.scalar_one_or_none()
+    if not old_version or str(old_version.document_id) != document_id:
+        raise HTTPException(status_code=404, detail="Version not found")
+        
+    try:
+        file_bytes = get_storage_file(old_version.storage_path)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Could not retrieve old version file: {e}")
+        
+    all_ver_res = await db.execute(
+        select(DocumentVersion).where(DocumentVersion.document_id == document_id).order_by(DocumentVersion.created_at.desc())
+    )
+    versions = all_ver_res.scalars().all()
+    latest_version_num = float(versions[0].version_number) if versions else 0.0
+    new_version_num = f"{latest_version_num + 1.0:.1f}"
+    
+    storage_path = f"{doc.case_id}/{doc.id}/{new_version_num}.pdf"
+    try:
+        save_storage_file(storage_path, file_bytes)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to store file: {e}")
+    
+    new_version = DocumentVersion(
+        id=uuid.uuid4(),
+        document_id=doc.id,
+        version_number=new_version_num,
+        storage_path=storage_path,
+        file_hash=old_version.file_hash,
+        created_by=current_user.id
+    )
+    db.add(new_version)
+    
+    doc.current_version_id = new_version.id
+    doc.status = "PROCESSING"
+    await db.commit()
+    await db.refresh(new_version)
+    
+    background_tasks.add_task(
+        process_document_background,
+        document_id=str(doc.id),
+        version_id=str(new_version.id),
+        file_bytes=file_bytes,
+        user_id=str(current_user.id)
+    )
+    
+    await log_document_action(db, current_user.id, "RESTORE_VERSION", doc.id, doc.case_id,
+                              details={"restored_from": old_version.version_number, "new_version": new_version_num})
+                              
+    return {"message": "Version restored successfully", "new_version_id": str(new_version.id), "status": "PROCESSING"}
+
+
+# ─── WORKFLOW / STATUS ────────────────────────────────────────────────────────
+
+class StatusPayload(BaseModel):
+    status: str
+    reason: Optional[str] = None
+
+
+@router.post("/{document_id}/status")
+async def update_document_status(
+    document_id: str,
+    payload: StatusPayload,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    result = await db.execute(select(Document).where(Document.id == document_id))
+    doc = result.scalar_one_or_none()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+        
+    from app.core.authorization import ROLE_PERMISSIONS, check_document_access
+    await check_document_access(db, doc, current_user, required_action="EDIT")
+    user_perms = ROLE_PERMISSIONS.get(current_user.role, [])
+    
+    # State machine logic
+    valid_transitions = {
+        "READY": ["SUBMITTED"],
+        "SUBMITTED": ["UNDER_REVIEW"],
+        "UNDER_REVIEW": ["APPROVED", "REJECTED"],
+        "APPROVED": ["LOCKED"]
+    }
+    
+    if payload.status not in valid_transitions.get(doc.status, []):
+        raise HTTPException(status_code=400, detail=f"Invalid transition from {doc.status} to {payload.status}")
+        
+    if payload.status == "SUBMITTED":
+        if "SUBMIT" not in user_perms:
+            raise HTTPException(status_code=403, detail="Role not authorized to submit documents")
+            
+    if payload.status in ["UNDER_REVIEW", "APPROVED", "REJECTED", "LOCKED"]:
+        if "APPROVE" not in user_perms:
+            raise HTTPException(status_code=403, detail="Role not authorized to review documents")
+        case_res = await db.execute(select(Case).where(Case.id == doc.case_id))
+        case = case_res.scalar_one_or_none()
+        if case and str(case.owning_officer_id) == str(current_user.id) and current_user.role != "Admin":
+            raise HTTPException(status_code=403, detail="Investigating officer cannot approve their own document")
+            
+    doc.status = payload.status
+    if payload.status == "REJECTED":
+        doc.rejection_reason = payload.reason
+        
+    await db.commit()
+    
+    action = payload.status if payload.status != "SUBMITTED" else "SUBMIT"
+    await log_document_action(db, current_user.id, action, doc.id, doc.case_id,
+                              details={"new_status": payload.status, "reason": payload.reason})
+                              
+    return {"message": f"Document status updated to {payload.status}"}
+
+
+# ─── INTEGRITY & RETRY ────────────────────────────────────────────────────────
+
+@router.post("/{document_id}/verify-integrity")
+async def verify_document_integrity(
+    document_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    result = await db.execute(select(Document).where(Document.id == document_id))
+    doc = result.scalar_one_or_none()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+        
+    from app.core.authorization import check_document_access
+    await check_document_access(db, doc, current_user, required_action="VIEW")
+    
+    ver_result = await db.execute(select(DocumentVersion).where(DocumentVersion.id == doc.current_version_id))
+    latest_version = ver_result.scalar_one_or_none()
+    if not latest_version:
+        raise HTTPException(status_code=404, detail="Current version not found")
+        
+    try:
+        file_bytes = get_storage_file(latest_version.storage_path)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"File could not be read: {e}")
+        
+    actual_hash = calculate_sha256(file_bytes)
+    expected_hash = latest_version.file_hash
+    
+    if actual_hash == expected_hash:
+        result_status = "VERIFIED"
+        latest_version.is_tampered = False
+    else:
+        result_status = "TAMPERED"
+        latest_version.is_tampered = True
+        
+    await db.commit()
+    
+    action = "INTEGRITY_CHECK" if result_status == "VERIFIED" else "INTEGRITY_FAILURE"
+    await log_document_action(db, current_user.id, action, doc.id, doc.case_id,
+                              details={"expected_hash": expected_hash, "actual_hash": actual_hash})
+                              
+    return {
+        "status": result_status,
+        "expected_hash": expected_hash,
+        "actual_hash": actual_hash,
+        "timestamp": datetime.utcnow().isoformat()
+    }
+
+
+@router.post("/{document_id}/retry")
+async def retry_document_processing(
+    background_tasks: BackgroundTasks,
+    document_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    result = await db.execute(select(Document).where(Document.id == document_id))
+    doc = result.scalar_one_or_none()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+        
+    from app.core.authorization import check_document_access
+    await check_document_access(db, doc, current_user, required_action="EDIT")
+    
+    if doc.status != "PROCESSING_FAILED":
+        raise HTTPException(status_code=400, detail="Only failed documents can be retried")
+        
+    if (doc.retry_count or 0) >= 3:
+        doc.status = "MANUAL_REVIEW_REQUIRED"
+        await db.commit()
+        await log_document_action(db, current_user.id, "PROCESSING_FAILURE", doc.id, doc.case_id,
+                                  details={"reason": "Maximum retry limit reached"})
+        return {"message": "Maximum retry limit reached. Manual review required.", "status": "MANUAL_REVIEW_REQUIRED"}
+        
+    ver_result = await db.execute(select(DocumentVersion).where(DocumentVersion.id == doc.current_version_id))
+    latest_version = ver_result.scalar_one_or_none()
+    if not latest_version:
+        raise HTTPException(status_code=404, detail="Version not found")
+        
+    try:
+        file_bytes = get_storage_file(latest_version.storage_path)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="Cannot retry: original file missing")
+        
+    doc.retry_count = (doc.retry_count or 0) + 1
+    doc.status = "PROCESSING"
+    await db.commit()
+    
+    background_tasks.add_task(
+        process_document_background,
+        document_id=str(doc.id),
+        version_id=str(latest_version.id),
+        file_bytes=file_bytes,
+        user_id=str(current_user.id)
+    )
+    
+    await log_document_action(db, current_user.id, "RETRY", doc.id, doc.case_id,
+                              details={"retry_count": doc.retry_count})
+                              
+    return {"message": "Processing retried", "status": "PROCESSING"}

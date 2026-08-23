@@ -8,7 +8,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
 from app.database import get_db
-from app.models import AuditLog, User
+from app.models import User
+from app.core.audit import log_audit_event
 from app.core.security import verify_password, get_password_hash, create_access_token, get_current_user
 from app.core.config import settings
 
@@ -38,16 +39,13 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends(), db: AsyncSessi
     )
 
     # Log Login Audit
-    audit = AuditLog(
-        id=uuid.uuid4(),
-        timestamp=datetime.utcnow(),
-        user_id=user.id,
+    await log_audit_event(
+        db=db,
         action="LOGIN",
+        user_id=user.id,
         result="SUCCESS",
-        details={"email": user.email, "role": user.role, "clearance_level": user.clearance_level},
-        current_hash="auth_session_established"
+        details={"email": user.email, "role": user.role, "clearance_level": user.clearance_level}
     )
-    db.add(audit)
     await db.commit()
 
     return {"access_token": access_token, "token_type": "bearer"}
@@ -80,16 +78,13 @@ async def change_password(
     current_user.password_hash = get_password_hash(payload.new_password)
     
     # Audit log
-    audit = AuditLog(
-        id=uuid.uuid4(),
-        timestamp=datetime.utcnow(),
-        user_id=current_user.id,
+    await log_audit_event(
+        db=db,
         action="PASSWORD_CHANGE",
+        user_id=current_user.id,
         result="SUCCESS",
-        details={"email": current_user.email},
-        current_hash="password_updated_securely"
+        details={"email": current_user.email}
     )
-    db.add(audit)
     await db.commit()
     await db.refresh(current_user)
 

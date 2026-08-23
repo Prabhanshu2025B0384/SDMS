@@ -60,6 +60,11 @@ export default function Documents() {
   const [newCaseNumber, setNewCaseNumber] = useState('');
   const [newCaseJurisdiction, setNewCaseJurisdiction] = useState('Cyber & Financial Crimes Unit');
   const [creatingCase, setCreatingCase] = useState(false);
+
+  const [openCaseStatus, setOpenCaseStatus] = useState(false);
+  const [caseStatusError, setCaseStatusError] = useState('');
+  const [newCaseStatus, setNewCaseStatus] = useState('');
+  const [updatingCaseStatus, setUpdatingCaseStatus] = useState(false);
   
   const [file, setFile] = useState<File | null>(null);
   const [title, setTitle] = useState('');
@@ -76,6 +81,9 @@ export default function Documents() {
   // Share dialog state
   const [shareDoc, setShareDoc] = useState<{ id: string; title: string; classification_level: number } | null>(null);
   const [shareOpen, setShareOpen] = useState(false);
+
+  const [versions, setVersions] = useState<any[]>([]);
+  const [versionsLoading, setVersionsLoading] = useState(false);
 
   const { token } = useAuth();
   const pollIntervalRef = useRef<any>(null);
@@ -181,6 +189,34 @@ export default function Documents() {
     }
   };
 
+  const handleUpdateCaseStatus = async () => {
+    if (!caseId || !newCaseStatus) return;
+    setUpdatingCaseStatus(true);
+    setCaseStatusError('');
+    try {
+      const res = await fetch(`http://${window.location.hostname}:8000/cases/${caseId}/status`, {
+        method: 'PATCH',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ status: newCaseStatus })
+      });
+      if (res.ok) {
+        setOpenCaseStatus(false);
+        setNewCaseStatus('');
+        fetchCases();
+      } else {
+        const err = await res.json();
+        setCaseStatusError(err.detail || 'Failed to update case status');
+      }
+    } catch (e) {
+      setCaseStatusError('Network error updating case status');
+    } finally {
+      setUpdatingCaseStatus(false);
+    }
+  };
+
   const handleUpload = async () => {
     if (!file || !title || !caseId) {
       setUploadError('Please select a file, fill in the title, and select a case.');
@@ -229,11 +265,142 @@ export default function Documents() {
       });
       if (res.ok) {
         setSelectedDoc(await res.json());
+        fetchVersions(docId);
       }
     } catch (e) {
       console.error("Failed to load details:", e);
     } finally {
       setViewLoading(false);
+    }
+  };
+
+  const fetchVersions = async (docId: string) => {
+    setVersionsLoading(true);
+    try {
+      const res = await fetch(`http://${window.location.hostname}:8000/documents/${docId}/versions`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.ok) {
+        setVersions(await res.json());
+      }
+    } catch (e) {
+      console.error("Failed to load versions:", e);
+    } finally {
+      setVersionsLoading(false);
+    }
+  };
+
+  const handleUpdateStatus = async (status: string, reason?: string) => {
+    if (!selectedDoc) return;
+    try {
+      const res = await fetch(`http://${window.location.hostname}:8000/documents/${selectedDoc.id}/status`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ status, reason })
+      });
+      if (res.ok) {
+        fetchDocuments();
+        handleViewDetails(selectedDoc.id);
+      } else {
+        const err = await res.json();
+        alert(err.detail || 'Failed to update status');
+      }
+    } catch (e) {
+      alert('Error updating status');
+    }
+  };
+
+  const handleVerifyIntegrity = async () => {
+    if (!selectedDoc) return;
+    try {
+      const res = await fetch(`http://${window.location.hostname}:8000/documents/${selectedDoc.id}/verify-integrity`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        alert(`Integrity Check: ${data.status}\n\nExpected: ${data.expected_hash}\nActual: ${data.actual_hash}`);
+        fetchDocuments();
+        fetchVersions(selectedDoc.id);
+      } else {
+        const err = await res.json();
+        alert(err.detail || 'Verification failed');
+      }
+    } catch (e) {
+      alert('Error verifying integrity');
+    }
+  };
+
+  const handleRestoreVersion = async (versionId: string) => {
+    if (!selectedDoc) return;
+    if (!window.confirm('Are you sure you want to restore this version? This will create a new current version from the selected past version.')) return;
+    try {
+      const res = await fetch(`http://${window.location.hostname}:8000/documents/${selectedDoc.id}/versions/${versionId}/restore`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.ok) {
+        alert('Version restored successfully');
+        fetchDocuments();
+        handleViewDetails(selectedDoc.id);
+      } else {
+        const err = await res.json();
+        alert(err.detail || 'Restore failed');
+      }
+    } catch (e) {
+      alert('Error restoring version');
+    }
+  };
+
+  const handleRetryProcessing = async (docId: string) => {
+    try {
+      const res = await fetch(`http://${window.location.hostname}:8000/documents/${docId}/retry`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.ok) {
+        alert('Retrying processing in background');
+        fetchDocuments();
+      } else {
+        const err = await res.json();
+        alert(err.detail || 'Retry failed');
+      }
+    } catch (e) {
+      alert('Error retrying processing');
+    }
+  };
+
+  const handleUploadNewVersion = async () => {
+    if (!selectedDoc || !file) {
+      alert('Please select a file to upload as the new version.');
+      return;
+    }
+    setUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      
+      const res = await fetch(`http://${window.location.hostname}:8000/documents/${selectedDoc.id}/versions`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` },
+        body: formData
+      });
+      
+      if (res.ok) {
+        setFile(null);
+        fetchDocuments();
+        handleViewDetails(selectedDoc.id);
+      } else {
+        const err = await res.json();
+        alert(err.detail || 'Upload new version failed');
+      }
+    } catch (e) {
+      alert('Error uploading new version');
+    } finally {
+      setUploading(false);
     }
   };
 
@@ -346,11 +513,18 @@ export default function Documents() {
                     <Chip 
                       label={doc.status === 'READY' ? 'READY / EXTRACTED' : doc.status} 
                       size="small" 
-                      color={doc.status === 'READY' ? 'success' : doc.status === 'PROCESSING' ? 'warning' : 'error'} 
+                      color={doc.status === 'READY' ? 'success' : doc.status === 'PROCESSING' ? 'warning' : doc.status === 'PROCESSING_FAILED' ? 'error' : 'info'} 
                       sx={{ fontWeight: 700 }}
                     />
                   </TableCell>
                   <TableCell align="right">
+                    {doc.status === 'PROCESSING_FAILED' && (
+                      <Tooltip title="Retry Processing">
+                        <IconButton color="warning" onClick={() => handleRetryProcessing(doc.id)}>
+                          <RefreshRounded />
+                        </IconButton>
+                      </Tooltip>
+                    )}
                     <Tooltip title="Share / Permissions">
                       <IconButton color="secondary" onClick={() => { setShareDoc(doc); setShareOpen(true); }}>
                         <ShareRounded />
@@ -436,8 +610,8 @@ export default function Documents() {
                 helperText="Select the case file this document belongs to"
               >
                 {cases.map((c) => (
-                  <MenuItem key={c.id} value={c.id}>
-                    {c.case_number} ({c.jurisdiction})
+                  <MenuItem key={c.id} value={c.id} disabled={c.status === 'CLOSED'}>
+                    {c.case_number} ({c.jurisdiction}) {c.status === 'CLOSED' ? '[CLOSED]' : ''}
                   </MenuItem>
                 ))}
               </TextField>
@@ -447,6 +621,19 @@ export default function Documents() {
                 onClick={() => setOpenCreateCase(true)}
               >
                 + New Case
+              </Button>
+              <Button 
+                variant="outlined" 
+                color="secondary"
+                sx={{ height: 54, whiteSpace: 'nowrap' }}
+                onClick={() => {
+                  setNewCaseStatus('');
+                  setCaseStatusError('');
+                  setOpenCaseStatus(true);
+                }}
+                disabled={!caseId || cases.find(c => c.id === caseId)?.status === 'CLOSED'}
+              >
+                Change Status
               </Button>
             </Box>
 
@@ -552,6 +739,28 @@ export default function Documents() {
                 <Chip label={`Version: ${selectedDoc.version_number || '1.0'}`} variant="outlined" />
               </Box>
 
+              <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+                {selectedDoc.status === 'READY' && (
+                  <Button variant="contained" size="small" onClick={() => handleUpdateStatus('SUBMITTED')}>Submit for Review</Button>
+                )}
+                {selectedDoc.status === 'SUBMITTED' && (
+                  <Button variant="contained" color="secondary" size="small" onClick={() => handleUpdateStatus('UNDER_REVIEW')}>Start Review</Button>
+                )}
+                {selectedDoc.status === 'UNDER_REVIEW' && (
+                  <>
+                    <Button variant="contained" color="success" size="small" onClick={() => handleUpdateStatus('APPROVED')}>Approve</Button>
+                    <Button variant="contained" color="error" size="small" onClick={() => {
+                        const reason = window.prompt("Enter rejection reason:");
+                        if (reason) handleUpdateStatus('REJECTED', reason);
+                    }}>Reject</Button>
+                  </>
+                )}
+                {selectedDoc.status === 'APPROVED' && (
+                  <Button variant="contained" color="warning" size="small" onClick={() => handleUpdateStatus('LOCKED')}>Lock Document</Button>
+                )}
+                <Button variant="outlined" size="small" color="info" onClick={handleVerifyIntegrity} startIcon={<ShieldRounded />}>Verify Integrity</Button>
+              </Box>
+
               {/* Structured Metadata Box */}
               {selectedDoc.structured_data && Object.keys(selectedDoc.structured_data).length > 0 && (
                 <Card sx={{ p: 2.5, bgcolor: 'background.default', border: '1px solid', borderColor: 'divider' }}>
@@ -584,6 +793,48 @@ export default function Documents() {
                   SHA-256 Checksum: {selectedDoc.file_hash}
                 </Typography>
               )}
+
+              {/* Version History Box */}
+              <Box>
+                <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>Version History</Typography>
+                {versionsLoading ? <CircularProgress size={20} /> : (
+                  <TableContainer component={Card} variant="outlined" sx={{ mb: 2 }}>
+                    <Table size="small">
+                      <TableHead>
+                        <TableRow>
+                          <TableCell>Version</TableCell>
+                          <TableCell>Date</TableCell>
+                          <TableCell>Integrity</TableCell>
+                          <TableCell>Actions</TableCell>
+                        </TableRow>
+                      </TableHead>
+                      <TableBody>
+                        {versions.map(v => (
+                          <TableRow key={v.id}>
+                            <TableCell>{v.version_number} {v.is_current && <Chip label="Current" size="small" color="primary" sx={{ ml: 1, height: 20 }} />}</TableCell>
+                            <TableCell>{new Date(v.created_at).toLocaleString()}</TableCell>
+                            <TableCell>{v.is_tampered ? <Chip label="Tampered" color="error" size="small" sx={{ height: 20 }} /> : <Chip label="Verified" color="success" size="small" sx={{ height: 20 }} />}</TableCell>
+                            <TableCell>
+                              {!v.is_current && selectedDoc.status !== 'LOCKED' && (
+                                <Button size="small" onClick={() => handleRestoreVersion(v.id)}>Restore</Button>
+                              )}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </TableContainer>
+                )}
+                
+                {selectedDoc.status !== 'LOCKED' && selectedDoc.status !== 'PROCESSING' && (
+                   <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+                     <input type="file" accept="application/pdf" onChange={(e) => setFile(e.target.files?.[0] || null)} />
+                     <Button size="small" variant="contained" onClick={handleUploadNewVersion} disabled={!file || uploading}>
+                       {uploading ? <CircularProgress size={20} /> : 'Upload New Version'}
+                     </Button>
+                   </Box>
+                )}
+              </Box>
             </Stack>
           )}
         </DialogContent>
@@ -610,6 +861,52 @@ export default function Documents() {
           classificationLevel={shareDoc.classification_level}
         />
       )}
+      {/* Change Case Status Dialog */}
+      <Dialog open={openCaseStatus} onClose={() => setOpenCaseStatus(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>Change Case Status</DialogTitle>
+        <DialogContent>
+          {caseStatusError && <Alert severity="error" sx={{ mb: 2 }}>{caseStatusError}</Alert>}
+          <Typography variant="body2" sx={{ mb: 3 }}>
+            Current Status: <strong>{cases.find(c => c.id === caseId)?.status || 'CREATED'}</strong>
+          </Typography>
+          
+          <TextField
+            select
+            label="New Status"
+            fullWidth
+            value={newCaseStatus}
+            onChange={(e) => setNewCaseStatus(e.target.value)}
+          >
+            {(() => {
+              const curr = cases.find(c => c.id === caseId)?.status || 'CREATED';
+              const validTransitions: Record<string, string[]> = {
+                "CREATED": ["INVESTIGATION"],
+                "INVESTIGATION": ["UNDER_REVIEW"],
+                "UNDER_REVIEW": ["APPROVED", "REJECTED"],
+                "REJECTED": ["INVESTIGATION"],
+                "APPROVED": ["CLOSED"],
+                "CLOSED": []
+              };
+              const allowed = validTransitions[curr] || [];
+              if (allowed.length === 0) return <MenuItem disabled value="">No valid transitions available</MenuItem>;
+              return allowed.map(st => (
+                <MenuItem key={st} value={st}>{st}</MenuItem>
+              ));
+            })()}
+          </TextField>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 3 }}>
+          <Button onClick={() => setOpenCaseStatus(false)} color="inherit">Cancel</Button>
+          <Button 
+            onClick={handleUpdateCaseStatus} 
+            variant="contained" 
+            color="primary"
+            disabled={!newCaseStatus || updatingCaseStatus}
+          >
+            {updatingCaseStatus ? <CircularProgress size={24} color="inherit" /> : 'Update Status'}
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 }

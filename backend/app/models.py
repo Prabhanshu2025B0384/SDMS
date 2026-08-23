@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import JSON, Boolean, Column, DateTime, ForeignKey, Index, Integer, String, Text, TypeDecorator
-from sqlalchemy.dialects.postgresql import UUID as PG_UUID
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID, TSVECTOR
 from sqlalchemy.orm import relationship
 
 from app.database import Base
@@ -83,10 +83,16 @@ class Document(Base):
     status = Column(String, default="PROCESSING")
     created_at = Column(DateTime, default=datetime.utcnow)
     current_version_id = Column(GUID, nullable=True)
-    search_vector = Column(Text, nullable=True)
+    search_vector = Column(TSVECTOR, nullable=True)
     
+    # Module enhancements
+    rejection_reason = Column(String, nullable=True)
+    failure_reason = Column(String, nullable=True)
+    retry_count = Column(Integer, default=0)
+
     # Relationships
     case = relationship("Case", backref="documents")
+    versions = relationship("DocumentVersion", back_populates="document")
 
 
 class DocumentPermission(Base):
@@ -107,8 +113,10 @@ class DocumentVersion(Base):
     storage_path = Column(String, nullable=False) # Path in Storage (Local / S3)
     file_hash = Column(String, nullable=False) # SHA-256
     raw_ocr_text = Column(Text, nullable=True)
-    structured_data = Column(JSON, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    structured_data = Column(JSON, default={})
+    is_tampered = Column(Boolean, default=False)
+
+    document = relationship("Document", back_populates="versions")
     created_by = Column(GUID, ForeignKey("users.id"), nullable=False)
 
 

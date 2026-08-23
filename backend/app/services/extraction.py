@@ -165,16 +165,18 @@ def extract_structured_data_with_ollama(raw_text: str) -> dict[str, Any]:
     
     try:
         response = requests.post(f"{settings.OLLAMA_BASE_URL}/api/generate", json=payload, timeout=5)
-        if response.status_code == 200:
-            result = response.json()
-            json_str = result.get("response", "{}")
-            extracted = json.loads(json_str)
-            if extracted and isinstance(extracted, dict):
-                return extracted
+        response.raise_for_status()
+        result = response.json()
+        json_str = result.get("response", "{}")
+        extracted = json.loads(json_str)
+        if extracted and isinstance(extracted, dict):
+            return extracted
+        else:
+            raise ValueError("AI returned invalid structured output format")
+    except json.JSONDecodeError:
+        raise ValueError("AI returned malformed JSON")
     except Exception as e:
-        print(f"Ollama AI offline or not responding ({e}). Using intelligent heuristic extractor.")
-
-    return extract_heuristic_structured_data(raw_text)
+        raise ValueError(f"AI extraction failed: {e}")
 
 
 def process_document_pipeline(pdf_path: str) -> dict[str, Any]:

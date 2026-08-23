@@ -17,8 +17,12 @@ router = APIRouter(prefix="/cases", tags=["Cases"])
 class CaseCreate(BaseModel):
     case_number: str
     jurisdiction: str
-    status: Optional[str] = "ACTIVE"
+    status: Optional[str] = "CREATED"
     owning_officer_id: Optional[str] = None
+
+
+class CaseStatusUpdate(BaseModel):
+    status: str
 
 
 class ReassignCasePayload(BaseModel):
@@ -78,7 +82,7 @@ async def create_case(payload: CaseCreate, db: AsyncSession = Depends(get_db), c
         id=uuid.uuid4(),
         case_number=payload.case_number,
         jurisdiction=payload.jurisdiction,
-        status=payload.status or "ACTIVE",
+        status=payload.status or "CREATED",
         owning_officer_id=owner_id
     )
     db.add(new_case)
@@ -168,6 +172,61 @@ async def add_case_assignment(
         "message": f"Officer {target_user.email} assigned to case {case.case_number}",
         "case_id": str(case.id),
         "user_id": str(target_user.id)
+    }
+
+
+@router.patch("/{case_id}/status")
+async def update_case_status(
+    case_id: str,
+    payload: CaseStatusUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    case_result = await db.execute(select(Case).where(Case.id == case_id))
+    case = case_result.scalar_one_or_none()
+    if not case:
+        raise HTTPException(status_code=404, detail="Case not found")
+
+    # Authorize: Must be owner or admin
+    if str(case.owning_officer_id) != str(current_user.id) and current_user.role != "Admin":
+        raise HTTPException(status_code=403, detail="Only case owner or Admin can change status")
+
+    current_status = case.status or "CREATED"
+    new_status = payload.status
+
+    valid_transitions = {
+        "CREATED": ["INVESTIGATION"],
+        "INVESTIGATION": ["UNDER_REVIEW"],
+        "UNDER_REVIEW": ["APPROVED", "REJECTED"],
+        "REJECTED": ["INVESTIGATION"],
+        "APPROVED": ["CLOSED"],
+        "CLOSED": [] # Terminal state
+    }
+
+    if new_status not in valid_transitions.get(current_status, []):
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Invalid transition from {current_status} to {new_status}"
+        )
+
+    case.status = new_status
+    
+    from app.core.audit import log_audit_event
+    await log_audit_event(
+        db=db,
+        action="CASE_STATUS_CHANGED",
+        user_id=current_user.id,
+        case_id=case.id,
+        details={"old_status": current_status, "new_status": new_status}
+    )
+    
+    await db.commit()
+    await db.refresh(case)
+
+    return {
+        "id": str(case.id),
+        "case_number": case.case_number,
+        "status": case.status
     }
 
 

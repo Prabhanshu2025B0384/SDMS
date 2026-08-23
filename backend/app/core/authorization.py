@@ -45,7 +45,13 @@ async def check_case_upload_permission(
 ) -> bool:
     """
     Checks if a user has permission to upload documents to a case.
+    Also ensures the case is not CLOSED.
     """
+    if case.status == "CLOSED":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot modify a CLOSED case."
+        )
     if user.role in ["Admin", "Senior Officer"] or (user.clearance_level and user.clearance_level >= 4):
         return True
 
@@ -86,7 +92,17 @@ async def check_document_access(
     2. Case Ownership
     3. Explicit Multi-User Document Permissions (DocumentPermission)
     4. Hierarchy Clearance Level (user.clearance_level >= document.classification_level)
+    
+    If required_action == 'EDIT', also ensures the associated Case is not CLOSED.
     """
+    case_res = await db.execute(select(Case).where(Case.id == document.case_id))
+    case = case_res.scalar_one_or_none()
+    
+    if required_action == "EDIT" and case and case.status == "CLOSED":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot edit documents in a CLOSED case."
+        )
     # 1. Admin or Executive clearance
     if user.role == "Admin" or (user.clearance_level and user.clearance_level >= 5):
         return True
@@ -108,8 +124,6 @@ async def check_document_access(
             return True
 
     # 3. Check Case ownership or assignment
-    case_res = await db.execute(select(Case).where(Case.id == document.case_id))
-    case = case_res.scalar_one_or_none()
     
     is_case_owner = case and str(case.owning_officer_id) == str(user.id)
     
@@ -144,3 +158,46 @@ async def check_document_access(
     )
 
 
+def get_authorized_document_filter(user: User):
+    """
+    Returns a SQLAlchemy filter condition for Document queries that enforces the exact
+    authorization rules defined in check_document_access().
+    """
+    from sqlalchemy import or_, and_
+    from app.models import Document, Case, CaseAssignment, DocumentPermission
+    
+    # 1. Admin or Executive clearance gets everything
+    if user.role == "Admin" or (user.clearance_level and user.clearance_level >= 5):
+        return True
+        
+    user_clearance = user.clearance_level or 1
+    
+    # Subqueries for explicit permissions and assignments
+    explicit_perm_subq = select(DocumentPermission.document_id).where(
+        DocumentPermission.user_id == user.id
+    )
+    
+    case_assigned_subq = select(CaseAssignment.case_id).where(
+        CaseAssignment.user_id == user.id
+    )
+    
+    # The filter logic:
+    return or_(
+        # Condition A: Explicit permission bypasses clearance check for VIEW
+        Document.id.in_(explicit_perm_subq),
+        
+        # Condition B: Meets clearance AND (owns case OR assigned to case)
+        and_(
+            Document.classification_level <= user_clearance,
+            or_(
+                Case.owning_officer_id == user.id,
+                Document.case_id.in_(case_assigned_subq)
+            )
+        ),
+        
+        # Condition C: Classification is 1 AND user has one of the roles
+        and_(
+            Document.classification_level == 1,
+            user.role in ["Investigating Officer", "Senior Officer", "Prosecutor"]
+        )
+    )

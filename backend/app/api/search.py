@@ -21,35 +21,66 @@ async def search_documents(
     Search documents securely across titles, case numbers, document types, and OCR text.
     Works seamlessly on SQLite and PostgreSQL.
     """
-    pattern = f"%{query}%"
+    # Create PostgreSQL TSQuery from user input
+    tsquery = func.websearch_to_tsquery('english', query)
     
-    # Universal SQL query matching title, document_type, or search_vector
-    filter_condition = or_(
-        Document.title.ilike(pattern),
-        Document.document_type.ilike(pattern),
-        Document.search_vector.ilike(pattern),
-        Case.case_number.ilike(pattern)
+    # 1. Base query joins Document, Case, and DocumentVersion (for text snippet)
+    from app.models import DocumentVersion
+    
+    query_stmt = (
+        select(
+            Document,
+            Case,
+            func.ts_rank(Document.search_vector, tsquery).label('rank'),
+            func.ts_headline(
+                'english',
+                DocumentVersion.raw_ocr_text,
+                tsquery,
+                'StartSel=<mark>, StopSel=</mark>, MaxWords=35, MinWords=15'
+            ).label('snippet')
+        )
+        .join(Case, Document.case_id == Case.id)
+        .outerjoin(
+            DocumentVersion, 
+            (DocumentVersion.document_id == Document.id) & 
+            (Document.current_version_id == DocumentVersion.id)
+        )
     )
     
-    query_stmt = select(Document).join(Case, Document.case_id == Case.id).where(filter_condition)
+    # 2. Filter by Full-Text Search match OR exact case number match
+    filter_condition = or_(
+        Document.search_vector.op('@@')(tsquery),
+        Case.case_number.ilike(f"%{query}%")
+    )
+    query_stmt = query_stmt.where(filter_condition)
     
-    if current_user.role != "Admin":
-        query_stmt = query_stmt.where(Case.owning_officer_id == current_user.id)
+    # 3. Apply exact security authorization
+    from app.core.authorization import get_authorized_document_filter
+    auth_filter = get_authorized_document_filter(current_user)
+    if auth_filter is not True:
+        query_stmt = query_stmt.where(auth_filter)
     
-    query_stmt = query_stmt.order_by(Document.created_at.desc())
+    # 4. Rank by relevance, then newest
+    query_stmt = query_stmt.order_by(text('rank DESC'), Document.created_at.desc())
     
     result = await db.execute(query_stmt)
-    documents = result.scalars().all()
     
-    return [
-        {
+    # Parse rows containing (Document, Case, rank, snippet)
+    documents_data = []
+    for row in result.all():
+        doc = row[0]
+        snippet = row[3]
+        documents_data.append({
             "id": str(doc.id),
             "title": doc.title,
             "document_type": doc.document_type,
             "status": doc.status,
             "case_id": str(doc.case_id),
-            "created_at": doc.created_at.isoformat() if doc.created_at else None
-        }
-        for doc in documents
-    ]
+            "created_at": doc.created_at.isoformat() if doc.created_at else None,
+            "snippet": snippet if snippet else ""
+        })
+    
+    return documents_data
+    
+
 
