@@ -102,16 +102,10 @@ export const theme = createTheme({
         sizeLarge: {
           height: 48,
         },
-        containedPrimary: {
+        contained: {
           boxShadow: `0 8px 16px 0 ${alpha(primary.main, 0.24)}`,
           '&:hover': {
-            boxShadow: `0 8px 16px 0 ${alpha(primary.main, 0.24)}`,
-          },
-        },
-        containedError: {
-          boxShadow: `0 8px 16px 0 ${alpha('#FF5630', 0.24)}`,
-          '&:hover': {
-            boxShadow: `0 8px 16px 0 ${alpha('#FF5630', 0.24)}`,
+            boxShadow: `0 8px 16px 0 ${alpha(primary.main, 0.32)}`,
           },
         },
       },

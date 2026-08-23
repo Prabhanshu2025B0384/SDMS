@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Box, Card, Typography, TextField, Button, Alert, Stack, InputAdornment, IconButton, useTheme } from '@mui/material';
+import { Box, Card, Typography, TextField, Button, Alert, Stack, InputAdornment, IconButton } from '@mui/material';
 import { Visibility, VisibilityOff } from '@mui/icons-material';
 import { useAuth } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
@@ -12,7 +12,7 @@ export default function Login() {
   const [info, setInfo] = useState('');
   const { login, user } = useAuth();
   const navigate = useNavigate();
-  const theme = useTheme();
+
 
   useEffect(() => {
     if (user) {
@@ -90,7 +90,7 @@ export default function Login() {
           }}>
             S
           </Box>
-          <Typography variant="h6" fontWeight="700" color="text.primary">Secure DMS</Typography>
+          <Typography variant="h6" sx={{ fontWeight: 700 }} color="text.primary">Secure DMS</Typography>
         </Box>
 
         <Box
@@ -98,13 +98,13 @@ export default function Login() {
           src="https://minimals.cc/assets/illustrations/illustration-dashboard.webp"
           alt="login"
           sx={{ width: '100%', maxWidth: 540, opacity: 0.9 }}
-          onError={(e) => e.currentTarget.style.display = 'none'}
+          onError={(e) => { (e.currentTarget as HTMLElement).style.display = 'none'; }}
         />
       </Box>
 
       {/* Right Side: Form */}
       <Box sx={{ flexGrow: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', p: { xs: 2, sm: 5 } }}>
-        <Card sx={{ p: { xs: 3, sm: 5 }, width: '100%', maxWidth: 480, boxShadow: { xs: 'none', sm: theme.components?.MuiCard?.styleOverrides?.root?.boxShadow } }}>
+        <Card sx={{ p: { xs: 3, sm: 5 }, width: '100%', maxWidth: 480, boxShadow: { xs: 'none', sm: '0 0 2px 0 rgba(145, 158, 171, 0.2), 0 12px 24px -4px rgba(145, 158, 171, 0.12)' } }}>
           <Stack spacing={2} sx={{ mb: 5 }}>
             <Typography variant="h4">Sign in to Secure DMS</Typography>
           </Stack>

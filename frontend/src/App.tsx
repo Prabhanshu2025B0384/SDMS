@@ -56,7 +56,7 @@ function Sidebar({ mobileOpen, onClose }: { mobileOpen: boolean; onClose: () => 
         }}>
           S
         </Box>
-        <Typography variant="h6" fontWeight="700" color="text.primary">Secure DMS</Typography>
+        <Typography variant="h6" sx={{ fontWeight: 700 }} color="text.primary">Secure DMS</Typography>
       </Box>
       
       <Box sx={{ px: 2, pb: 2 }}>

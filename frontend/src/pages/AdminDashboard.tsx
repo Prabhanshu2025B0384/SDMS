@@ -20,7 +20,6 @@ import {
   DialogContent,
   DialogActions,
   TextField,
-  Stack,
   Breadcrumbs,
   MenuItem
 } from '@mui/material';
@@ -66,13 +65,50 @@ export default function AdminDashboard() {
   });
   const [isDeleting, setIsDeleting] = useState(false);
   
+  const [openAssignModal, setOpenAssignModal] = useState(false);
+  const [selectedCaseForAssign, setSelectedCaseForAssign] = useState<any | null>(null);
+  const [selectedOfficerId, setSelectedOfficerId] = useState('');
+  const [assigningOfficer, setAssigningOfficer] = useState(false);
+
   const { token } = useAuth();
+
+  const confirmDelete = (type: 'user' | 'case', id: string) => {
+    setDeleteConfirm({ open: true, type, id });
+  };
+
+  const handleAssignCase = async () => {
+    if (!selectedCaseForAssign || !selectedOfficerId) return;
+    setAssigningOfficer(true);
+    try {
+      const res = await fetch(`http://${window.location.hostname}:8000/cases/${selectedCaseForAssign.id}/reassign`, {
+        method: 'PATCH',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ officer_id: selectedOfficerId })
+      });
+      if (res.ok) {
+        setOpenAssignModal(false);
+        fetchCases();
+      } else {
+        const err = await res.json().catch(() => ({}));
+        alert(`Failed to assign case: ${err.detail || 'Unknown error'}`);
+      }
+    } catch (e: any) {
+      alert(`Network error assigning case: ${e.message || e}`);
+    } finally {
+      setAssigningOfficer(false);
+    }
+  };
+
 
   const fetchUsers = async () => {
     setLoading(true);
     try {
       const res = await fetch(`http://${window.location.hostname}:8000/admin/users`, { headers: { 'Authorization': `Bearer ${token}` } });
       if (res.ok) setUsers(await res.json());
+
     } finally { setLoading(false); }
   };
 
@@ -280,6 +316,9 @@ export default function AdminDashboard() {
                             size="small" 
                             color={user.is_active ? "success" : "error"} 
                             variant="outlined"
+                            onClick={() => handleToggleUserStatus(user)}
+                            sx={{ cursor: 'pointer' }}
+                            title="Click to toggle account status"
                           />
                         </TableCell>
                         <TableCell align="right">
@@ -377,14 +416,19 @@ export default function AdminDashboard() {
             </TabPanel>
 
             <TabPanel value={tabValue} index={1}>
-              <Typography variant="body1" color="text.secondary" sx={{ mb: 2 }}>
-                Superuser view: All cases are listed here regardless of assignment. You have full Read/Write/Delete access.
-              </Typography>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                <Typography variant="body1" color="text.secondary">
+                  Superuser Case Control: View all cases, manage ownership, and assign cases to investigating officers.
+                </Typography>
+                <Button variant="outlined" onClick={fetchCases}>Refresh Cases</Button>
+              </Box>
               <TableContainer>
                 <Table>
                   <TableHead>
                     <TableRow>
-                      <TableCell>Case ID</TableCell>
+                      <TableCell>Case Number</TableCell>
+                      <TableCell>Jurisdiction / Unit</TableCell>
+                      <TableCell>Assigned Officer (Owner)</TableCell>
                       <TableCell>Status</TableCell>
                       <TableCell align="right">Actions</TableCell>
                     </TableRow>
@@ -393,16 +437,73 @@ export default function AdminDashboard() {
                     {cases.map((c) => (
                       <TableRow key={c.id} hover>
                         <TableCell sx={{ fontWeight: 600 }}>{c.case_number}</TableCell>
+                        <TableCell>{c.jurisdiction}</TableCell>
+                        <TableCell>
+                          <Chip 
+                            icon={<VerifiedUserRounded sx={{ fontSize: '16px !important' }} />}
+                            label={c.owning_officer_email || 'Unassigned'} 
+                            size="small" 
+                            color="primary" 
+                            variant="outlined" 
+                          />
+                        </TableCell>
                         <TableCell><Chip label={c.status} size="small" color="info" /></TableCell>
                         <TableCell align="right">
-                          <Button size="small" color="error" startIcon={<DeleteRounded />} onClick={() => confirmDelete('case', c.id)}>Force Delete</Button>
+                          <Button 
+                            size="small" 
+                            variant="outlined" 
+                            color="primary"
+                            sx={{ mr: 1 }}
+                            onClick={() => {
+                              setSelectedCaseForAssign(c);
+                              setSelectedOfficerId(c.owning_officer_id || '');
+                              setOpenAssignModal(true);
+                            }}
+                          >
+                            Assign / Transfer
+                          </Button>
+                          <Button size="small" color="error" startIcon={<DeleteRounded />} onClick={() => confirmDelete('case', c.id)}>Delete</Button>
                         </TableCell>
                       </TableRow>
                     ))}
-                    {cases.length === 0 && <TableRow><TableCell colSpan={3} align="center">No cases found</TableCell></TableRow>}
+                    {cases.length === 0 && <TableRow><TableCell colSpan={5} align="center">No cases found</TableCell></TableRow>}
                   </TableBody>
                 </Table>
               </TableContainer>
+
+              {/* Assign Officer Modal */}
+              <Dialog open={openAssignModal} onClose={() => setOpenAssignModal(false)} maxWidth="xs" fullWidth>
+                <DialogTitle sx={{ fontWeight: 700 }}>Assign Case to Officer</DialogTitle>
+                <DialogContent dividers>
+                  <Box sx={{ pt: 1, display: 'flex', flexDirection: 'column', gap: 2 }}>
+                    <Typography variant="subtitle2">
+                      Case: <strong>{selectedCaseForAssign?.case_number}</strong> ({selectedCaseForAssign?.jurisdiction})
+                    </Typography>
+                    <TextField
+                      select
+                      fullWidth
+                      label="Select Assigned Officer"
+                      value={selectedOfficerId}
+                      onChange={(e) => setSelectedOfficerId(e.target.value)}
+                    >
+                      {users.map((u) => (
+                        <MenuItem key={u.id} value={u.id}>
+                          {u.email} ({u.role})
+                        </MenuItem>
+                      ))}
+                    </TextField>
+                    <Typography variant="caption" color="text.secondary">
+                      The assigned officer will immediately have full permissions to upload, view, and manage documents for this case.
+                    </Typography>
+                  </Box>
+                </DialogContent>
+                <DialogActions sx={{ p: 2 }}>
+                  <Button onClick={() => setOpenAssignModal(false)} color="inherit">Cancel</Button>
+                  <Button onClick={handleAssignCase} variant="contained" disabled={!selectedOfficerId || assigningOfficer}>
+                    {assigningOfficer ? <CircularProgress size={20} /> : 'Save Assignment'}
+                  </Button>
+                </DialogActions>
+              </Dialog>
             </TabPanel>
 
             <TabPanel value={tabValue} index={2}>
