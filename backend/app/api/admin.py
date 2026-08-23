@@ -10,9 +10,10 @@ from sqlalchemy.future import select
 from sqlalchemy.exc import IntegrityError
 
 from app.database import get_db
-from app.models import User, Case, Document, DocumentPermission, AuditLog
+from app.models import User, Case, Document, DocumentPermission, AuditLog, CaseAssignment, DocumentVersion
 from app.core.security import get_current_user, get_password_hash
 from app.core.authorization import RoleChecker, CLEARANCE_LEVELS
+from app.core.audit import log_audit_event
 
 router = APIRouter(
     prefix="/admin",
@@ -24,12 +25,24 @@ router = APIRouter(
 # ─── USERS ───────────────────────────────────────────────────────────────────
 
 @router.get("/users")
-async def list_all_users(db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(User).order_by(User.clearance_level.desc()))
+async def list_all_users(search: Optional[str] = None, db: AsyncSession = Depends(get_db)):
+    query = select(User).where(User.is_deleted == False)
+    
+    if search:
+        search_term = f"%{search.strip()}%"
+        query = query.where(
+            (User.public_id.ilike(search_term)) |
+            (User.email.ilike(search_term)) |
+            (User.department.ilike(search_term)) |
+            (User.role.ilike(search_term))
+        )
+        
+    result = await db.execute(query.order_by(User.clearance_level.desc()))
     users = result.scalars().all()
     return [
         {
             "id": str(u.id),
+            "public_id": u.public_id,
             "email": u.email,
             "role": u.role,
             "department": u.department,
@@ -66,18 +79,30 @@ async def create_user(payload: UserCreate, db: AsyncSession = Depends(get_db)):
 
     new_user = User(
         id=uuid.uuid4(),
+        public_id=f"USR-{uuid.uuid4().hex[:8].upper()}",
         email=payload.email,
         password_hash=get_password_hash(payload.password),
         role=payload.role,
         department=payload.department,
         clearance_level=max(1, min(5, payload.clearance_level)),
-        is_active=True
+        is_active=True,
+        is_deleted=False
     )
     db.add(new_user)
     await db.commit()
     await db.refresh(new_user)
+
+    await log_audit_event(
+        db=db,
+        action="USER_CREATED",
+        user_id=new_user.id,
+        result="SUCCESS",
+        details={"email": new_user.email, "role": new_user.role}
+    )
+    await db.commit()
     return {
         "id": str(new_user.id),
+        "public_id": new_user.public_id,
         "email": new_user.email,
         "role": new_user.role,
         "department": new_user.department,
@@ -109,6 +134,19 @@ async def update_user(user_id: str, payload: UserUpdate, db: AsyncSession = Depe
 
     await db.commit()
     await db.refresh(user)
+
+    action = "USER_UPDATED"
+    if payload.is_active is not None:
+        action = "USER_REACTIVATED" if payload.is_active else "USER_DEACTIVATED"
+
+    await log_audit_event(
+        db=db,
+        action=action,
+        user_id=user.id,
+        result="SUCCESS",
+        details={"email": user.email, "role": user.role, "is_active": user.is_active}
+    )
+    await db.commit()
     return {
         "id": str(user.id),
         "email": user.email,
@@ -121,21 +159,38 @@ async def update_user(user_id: str, payload: UserUpdate, db: AsyncSession = Depe
 
 
 @router.delete("/users/{user_id}")
-async def delete_user(user_id: str, db: AsyncSession = Depends(get_db)):
+async def delete_user(user_id: str, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
+    if user_id == str(current_user.id):
+        raise HTTPException(status_code=400, detail="Cannot delete or deactivate your own active session.")
+
     result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    try:
-        await db.delete(user)
-        await db.commit()
-        return {"message": "User deleted"}
-    except IntegrityError:
-        await db.rollback()
-        raise HTTPException(
-            status_code=400,
-            detail="Cannot delete this user because they are linked to existing cases, documents, or audit logs."
-        )
+
+    if user.role == "Admin" and user.is_active:
+        admin_count = await db.scalar(select(func.count(User.id)).where(User.role == "Admin", User.is_active == True))
+        if admin_count <= 1:
+            raise HTTPException(status_code=400, detail="Cannot delete or deactivate the last active administrator.")
+
+    user.preserved_email = user.email
+    user.email = f"deleted_{uuid.uuid4().hex[:8]}@dms.local"
+    user.password_hash = "DELETED"
+    user.is_active = False
+    user.is_deleted = True
+    
+    await db.commit()
+
+    await log_audit_event(
+        db=db,
+        action="USER_DELETED",
+        user_id=user.id,
+        result="SUCCESS",
+        details={"preserved_email": user.preserved_email, "public_id": user.public_id}
+    )
+    await db.commit()
+
+    return {"message": "User permanently deleted."}
 
 
 # ─── CASES ───────────────────────────────────────────────────────────────────

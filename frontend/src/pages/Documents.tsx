@@ -84,6 +84,9 @@ export default function Documents() {
 
   const [versions, setVersions] = useState<any[]>([]);
   const [versionsLoading, setVersionsLoading] = useState(false);
+  
+  const [auditLogs, setAuditLogs] = useState<any[]>([]);
+  const [auditLoading, setAuditLoading] = useState(false);
 
   const { token } = useAuth();
   const pollIntervalRef = useRef<any>(null);
@@ -266,6 +269,7 @@ export default function Documents() {
       if (res.ok) {
         setSelectedDoc(await res.json());
         fetchVersions(docId);
+        fetchAuditHistory(docId);
       }
     } catch (e) {
       console.error("Failed to load details:", e);
@@ -287,6 +291,22 @@ export default function Documents() {
       console.error("Failed to load versions:", e);
     } finally {
       setVersionsLoading(false);
+    }
+  };
+
+  const fetchAuditHistory = async (docId: string) => {
+    setAuditLoading(true);
+    try {
+      const res = await fetch(`http://${window.location.hostname}:8000/documents/${docId}/audit-history`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.ok) {
+        setAuditLogs(await res.json());
+      }
+    } catch (e) {
+      console.error("Failed to load audit history:", e);
+    } finally {
+      setAuditLoading(false);
     }
   };
 
@@ -735,9 +755,15 @@ export default function Documents() {
                   sx={{ fontWeight: 700 }}
                 />
                 <Chip label={`Type: ${selectedDoc.document_type}`} color="primary" variant="outlined" />
-                <Chip label={`Status: ${selectedDoc.status}`} color={selectedDoc.status === 'READY' ? 'success' : 'warning'} />
+                <Chip label={`Status: ${selectedDoc.status}`} color={selectedDoc.status === 'READY' ? 'success' : selectedDoc.status === 'PROCESSING_FAILED' ? 'error' : 'warning'} />
                 <Chip label={`Version: ${selectedDoc.version_number || '1.0'}`} variant="outlined" />
               </Box>
+
+              {selectedDoc.status === 'PROCESSING_FAILED' && selectedDoc.failure_reason && (
+                <Alert severity="error">
+                  <strong>Processing Failed:</strong> {selectedDoc.failure_reason}
+                </Alert>
+              )}
 
               <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
                 {selectedDoc.status === 'READY' && (
@@ -833,6 +859,36 @@ export default function Documents() {
                        {uploading ? <CircularProgress size={20} /> : 'Upload New Version'}
                      </Button>
                    </Box>
+                )}
+              </Box>
+
+              {/* Audit History Box */}
+              <Box>
+                <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>Audit History</Typography>
+                {auditLoading ? <CircularProgress size={20} /> : (
+                  <TableContainer component={Card} variant="outlined" sx={{ mb: 2 }}>
+                    <Table size="small">
+                      <TableHead>
+                        <TableRow>
+                          <TableCell>Date/Time</TableCell>
+                          <TableCell>User</TableCell>
+                          <TableCell>Action</TableCell>
+                        </TableRow>
+                      </TableHead>
+                      <TableBody>
+                        {auditLogs.map(log => (
+                          <TableRow key={log.id}>
+                            <TableCell>{new Date(log.timestamp).toLocaleString()}</TableCell>
+                            <TableCell>{log.user_email}</TableCell>
+                            <TableCell>
+                              {log.action}
+                              {log.details?.version_number && ` (v${log.details.version_number})`}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </TableContainer>
                 )}
               </Box>
             </Stack>

@@ -27,11 +27,29 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends(), db: AsyncSessi
     user = result.scalar_one_or_none()
     
     if not user or not verify_password(form_data.password, user.password_hash):
+        await log_audit_event(
+            db=db,
+            action="LOGIN_FAILED",
+            result="FAILURE",
+            details={"email": form_data.username, "reason": "Incorrect credentials"}
+        )
+        await db.commit()
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect username or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
+        
+    if not user.is_active or user.is_deleted:
+        await log_audit_event(
+            db=db,
+            action="LOGIN_FAILED",
+            user_id=user.id,
+            result="FAILURE",
+            details={"email": user.email, "reason": "Account deactivated or deleted"}
+        )
+        await db.commit()
+        raise HTTPException(status_code=403, detail="Account is deactivated or deleted")
         
     access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
@@ -41,7 +59,7 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends(), db: AsyncSessi
     # Log Login Audit
     await log_audit_event(
         db=db,
-        action="LOGIN",
+        action="LOGIN_SUCCESS",
         user_id=user.id,
         result="SUCCESS",
         details={"email": user.email, "role": user.role, "clearance_level": user.clearance_level}

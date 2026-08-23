@@ -47,12 +47,15 @@ class GUID(TypeDecorator):
 class User(Base):
     __tablename__ = "users"
     id = Column(GUID, primary_key=True, default=uuid.uuid4)
+    public_id = Column(String, unique=True, index=True, nullable=True)
     email = Column(String, unique=True, index=True, nullable=False)
+    preserved_email = Column(String, nullable=True)
     password_hash = Column(String, nullable=False)
     role = Column(String, nullable=False)
     department = Column(String, nullable=False)
     clearance_level = Column(Integer, default=1, nullable=False) # 1: Junior, 2: Inspector, 3: Senior IO, 4: SP/Senior, 5: Executive/Admin
     is_active = Column(Boolean, default=True)
+    is_deleted = Column(Boolean, default=False)
 
 
 class Case(Base):

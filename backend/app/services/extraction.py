@@ -172,11 +172,14 @@ def extract_structured_data_with_ollama(raw_text: str) -> dict[str, Any]:
         if extracted and isinstance(extracted, dict):
             return extracted
         else:
-            raise ValueError("AI returned invalid structured output format")
+            print("AI returned invalid structured output format, falling back to heuristic")
+            return extract_heuristic_structured_data(raw_text)
     except json.JSONDecodeError:
-        raise ValueError("AI returned malformed JSON")
+        print("AI returned malformed JSON, falling back to heuristic")
+        return extract_heuristic_structured_data(raw_text)
     except Exception as e:
-        raise ValueError(f"AI extraction failed: {e}")
+        print(f"AI extraction failed: {e}, falling back to heuristic")
+        return extract_heuristic_structured_data(raw_text)
 
 
 def process_document_pipeline(pdf_path: str) -> dict[str, Any]:

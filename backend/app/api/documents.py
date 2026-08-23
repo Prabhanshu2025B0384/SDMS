@@ -9,6 +9,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPExcepti
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
+from sqlalchemy import func
 
 from app.core.config import settings
 from app.core.security import get_current_user
@@ -69,7 +70,7 @@ async def process_document_background(
             )
             version = ver_result.scalar_one_or_none()
             if version:
-                version.raw_ocr_text = extracted.get("raw_text", "")
+                version.raw_ocr_text = extracted.get("raw_ocr_text", "")
                 version.structured_data = extracted.get("structured_data", {})
                 await session.commit()
 
@@ -79,7 +80,11 @@ async def process_document_background(
             doc = doc_result.scalar_one_or_none()
             if doc:
                 doc.status = "READY"
-                doc.search_vector = f"{doc.title} {doc.document_type} {extracted.get('raw_text', '')[:500]}"
+                # Combine title, type, OCR text, and structured metadata for search
+                meta = extracted.get('structured_data', {})
+                meta_text = " ".join(str(v) for v in meta.values() if v) if isinstance(meta, dict) else ""
+                search_text = f"{doc.title} {doc.document_type} {meta_text} {extracted.get('raw_ocr_text', '')}"
+                doc.search_vector = func.to_tsvector('english', search_text)
                 await session.commit()
                 print(f"Successfully processed document {document_id} to status READY")
     except Exception as e:
@@ -153,11 +158,11 @@ async def get_document_details(
     await check_document_access(db, doc, current_user, required_action="VIEW")
 
     # Log VIEW event
-    await log_document_action(db, current_user.id, "VIEW", doc.id, doc.case_id,
+    await log_document_action(db, current_user.id, "DOCUMENT_VIEWED", doc.id, doc.case_id,
                               details={"title": doc.title, "user_email": current_user.email})
 
     ver_result = await db.execute(
-        select(DocumentVersion).where(DocumentVersion.document_id == document_id).order_by(DocumentVersion.created_at.desc())
+        select(DocumentVersion).where(DocumentVersion.id == doc.current_version_id)
     )
     latest_version = ver_result.scalars().first()
 
@@ -167,6 +172,7 @@ async def get_document_details(
         "document_type": doc.document_type,
         "classification_level": doc.classification_level or 1,
         "status": doc.status,
+        "failure_reason": doc.failure_reason,
         "case_id": str(doc.case_id),
         "created_at": doc.created_at.isoformat() if doc.created_at else None,
         "raw_ocr_text": latest_version.raw_ocr_text if latest_version else None,
@@ -194,7 +200,7 @@ async def download_document(
     await check_document_access(db, doc, current_user, required_action="DOWNLOAD")
 
     ver_result = await db.execute(
-        select(DocumentVersion).where(DocumentVersion.document_id == document_id).order_by(DocumentVersion.created_at.desc())
+        select(DocumentVersion).where(DocumentVersion.id == doc.current_version_id)
     )
     latest_version = ver_result.scalars().first()
     if not latest_version:
@@ -203,8 +209,8 @@ async def download_document(
     try:
         file_bytes = get_storage_file(latest_version.storage_path)
         # Log DOWNLOAD event
-        await log_document_action(db, current_user.id, "DOWNLOAD", doc.id, doc.case_id,
-                                  details={"title": doc.title, "user_email": current_user.email})
+        await log_document_action(db, current_user.id, "DOCUMENT_DOWNLOADED", doc.id, doc.case_id,
+                                  details={"title": doc.title, "user_email": current_user.email, "version_number": latest_version.version_number})
         filename = f"{doc.title.replace(' ', '_')}.pdf"
         return Response(
             content=file_bytes,
@@ -304,7 +310,7 @@ async def share_document(
     await db.commit()
 
     # Audit log
-    await log_document_action(db, current_user.id, "SHARE", doc.id, doc.case_id,
+    await log_document_action(db, current_user.id, "DOCUMENT_SHARED", doc.id, doc.case_id,
                               details={"shared_with": payload.user_ids, "permission": payload.permission_type})
 
     return {"message": f"Permissions updated for {len(payload.user_ids)} user(s).", "results": results}
@@ -377,7 +383,7 @@ async def upload_document(
         document_type=document_type,
         classification_level=max(1, min(5, classification_level)),
         status="PROCESSING",
-        search_vector=f"{title} {document_type}"
+        search_vector=func.to_tsvector('english', f"{title} {document_type}")
     )
     db.add(new_doc)
     await db.commit()
@@ -423,11 +429,11 @@ async def upload_document(
     from app.core.audit import log_audit_event
     await log_audit_event(
         db=db,
-        action="UPLOAD",
+        action="DOCUMENT_UPLOADED",
         user_id=current_user.id,
         document_id=new_doc.id,
         case_id=case.id,
-        details={"title": title, "classification_level": classification_level, "user_email": current_user.email}
+        details={"title": title, "classification_level": classification_level, "user_email": current_user.email, "version_number": "1.0"}
     )
     await db.commit()
 
@@ -464,7 +470,7 @@ async def create_document_version(
         
     # Get current latest version number
     ver_result = await db.execute(
-        select(DocumentVersion).where(DocumentVersion.document_id == document_id).order_by(DocumentVersion.created_at.desc())
+        select(DocumentVersion).where(DocumentVersion.id == doc.current_version_id)
     )
     versions = ver_result.scalars().all()
     latest_version_num = float(versions[0].version_number) if versions else 0.0
@@ -503,8 +509,8 @@ async def create_document_version(
         user_id=str(current_user.id)
     )
     
-    await log_document_action(db, current_user.id, "VERSION_CREATED", doc.id, doc.case_id,
-                              details={"new_version": new_version_num, "user_email": current_user.email})
+    await log_document_action(db, current_user.id, "DOCUMENT_VERSION_UPLOADED", doc.id, doc.case_id,
+                              details={"version_number": new_version_num, "user_email": current_user.email})
                               
     return {"message": "New version created successfully", "version_id": str(new_version.id), "status": "PROCESSING"}
 
@@ -524,7 +530,7 @@ async def get_document_versions(
     await check_document_access(db, doc, current_user, required_action="VIEW")
     
     ver_result = await db.execute(
-        select(DocumentVersion).where(DocumentVersion.document_id == document_id).order_by(DocumentVersion.created_at.desc())
+        select(DocumentVersion).where(DocumentVersion.document_id == document_id).order_by(DocumentVersion.version_number.desc())
     )
     versions = ver_result.scalars().all()
     
@@ -535,7 +541,7 @@ async def get_document_versions(
         {
             "id": str(v.id),
             "version_number": v.version_number,
-            "created_at": v.created_at.isoformat() if v.created_at else None,
+            "created_at": v.created_at.isoformat() if hasattr(v, 'created_at') and v.created_at else None,
             "created_by": users_map.get(str(v.created_by), "Unknown"),
             "file_hash": v.file_hash,
             "is_tampered": v.is_tampered,
@@ -575,7 +581,7 @@ async def restore_document_version(
         raise HTTPException(status_code=500, detail=f"Could not retrieve old version file: {e}")
         
     all_ver_res = await db.execute(
-        select(DocumentVersion).where(DocumentVersion.document_id == document_id).order_by(DocumentVersion.created_at.desc())
+        select(DocumentVersion).where(DocumentVersion.id == doc.current_version_id)
     )
     versions = all_ver_res.scalars().all()
     latest_version_num = float(versions[0].version_number) if versions else 0.0
@@ -610,8 +616,8 @@ async def restore_document_version(
         user_id=str(current_user.id)
     )
     
-    await log_document_action(db, current_user.id, "RESTORE_VERSION", doc.id, doc.case_id,
-                              details={"restored_from": old_version.version_number, "new_version": new_version_num})
+    await log_document_action(db, current_user.id, "DOCUMENT_RESTORED", doc.id, doc.case_id,
+                              details={"source_version": old_version.version_number, "new_version": new_version_num})
                               
     return {"message": "Version restored successfully", "new_version_id": str(new_version.id), "status": "PROCESSING"}
 
@@ -668,7 +674,13 @@ async def update_document_status(
         
     await db.commit()
     
-    action = payload.status if payload.status != "SUBMITTED" else "SUBMIT"
+    action_map = {
+        "SUBMITTED": "DOCUMENT_SUBMITTED",
+        "APPROVED": "DOCUMENT_APPROVED",
+        "REJECTED": "DOCUMENT_DENIED",
+        "LOCKED": "DOCUMENT_LOCKED"
+    }
+    action = action_map.get(payload.status, f"DOCUMENT_{payload.status}")
     await log_document_action(db, current_user.id, action, doc.id, doc.case_id,
                               details={"new_status": payload.status, "reason": payload.reason})
                               
@@ -772,7 +784,41 @@ async def retry_document_processing(
         user_id=str(current_user.id)
     )
     
-    await log_document_action(db, current_user.id, "RETRY", doc.id, doc.case_id,
+    await log_document_action(db, current_user.id, "DOCUMENT_PROCESSING_RETRY", doc.id, doc.case_id,
                               details={"retry_count": doc.retry_count})
                               
     return {"message": "Processing retried", "status": "PROCESSING"}
+
+
+@router.get("/{document_id}/audit-history")
+async def get_document_audit_history(
+    document_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    result = await db.execute(select(Document).where(Document.id == document_id))
+    doc = result.scalar_one_or_none()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+        
+    from app.core.authorization import check_document_access
+    await check_document_access(db, doc, current_user, required_action="VIEW")
+    
+    logs_result = await db.execute(
+        select(AuditLog).where(AuditLog.document_id == document_id).order_by(AuditLog.timestamp.desc())
+    )
+    logs = logs_result.scalars().all()
+    
+    users_result = await db.execute(select(User))
+    users_map = {str(u.id): {"email": u.email, "role": u.role} for u in users_result.scalars().all()}
+    
+    return [
+        {
+            "id": str(l.id),
+            "timestamp": l.timestamp.isoformat(),
+            "action": l.action,
+            "user_email": users_map.get(str(l.user_id), {}).get("email", "System"),
+            "details": l.details
+        }
+        for l in logs
+    ]

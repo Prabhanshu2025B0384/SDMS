@@ -140,6 +140,17 @@ async def check_document_access(
     doc_classification = document.classification_level or 1
     
     if user_clearance < doc_classification:
+        from app.core.audit import log_audit_event
+        await log_audit_event(
+            db=db,
+            action="UNAUTHORIZED_ACCESS_ATTEMPT",
+            user_id=user.id,
+            document_id=document.id,
+            case_id=document.case_id,
+            result="FAILURE",
+            details={"reason": "Insufficient clearance level"}
+        )
+        await db.commit()
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=f"Security Classification Error: Document classification is Level {doc_classification}, but your clearance is Level {user_clearance}."
@@ -152,6 +163,17 @@ async def check_document_access(
     if doc_classification == 1 and user.role in ["Investigating Officer", "Senior Officer", "Prosecutor"]:
         return True
 
+    from app.core.audit import log_audit_event
+    await log_audit_event(
+        db=db,
+        action="UNAUTHORIZED_ACCESS_ATTEMPT",
+        user_id=user.id,
+        document_id=document.id,
+        case_id=document.case_id,
+        result="FAILURE",
+        details={"reason": "No assigned permission or case access"}
+    )
+    await db.commit()
     raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
         detail="You do not have permission to access this document. Request access from the document owner or an Admin."

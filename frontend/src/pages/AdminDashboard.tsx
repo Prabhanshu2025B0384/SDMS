@@ -64,6 +64,7 @@ function StatCard({ label, value, icon, color }: { label: string; value: number 
 export default function AdminDashboard() {
   const [tabValue, setTabValue] = useState(0);
   const [users, setUsers] = useState<any[]>([]);
+  const [searchQuery, setSearchQuery] = useState('');
   const [cases, setCases] = useState<any[]>([]);
   const [auditData, setAuditData] = useState<{ summary: any; logs: any[] }>({ summary: {}, logs: [] });
   const [loading, setLoading] = useState(false);
@@ -86,7 +87,7 @@ export default function AdminDashboard() {
   });
 
   // Delete
-  const [deleteConfirm, setDeleteConfirm] = useState<{ open: boolean; type: 'user' | 'case' | null; id: string | null }>({
+  const [deleteConfirm, setDeleteConfirm] = useState<{ open: boolean; type: 'user' | 'case' | null; id: string | null; dependencies?: any }>({
     open: false, type: null, id: null
   });
   const [isDeleting, setIsDeleting] = useState(false);
@@ -107,7 +108,10 @@ export default function AdminDashboard() {
   const fetchUsers = async () => {
     setLoading(true);
     try {
-      const res = await fetch(`http://${window.location.hostname}:8000/admin/users`, { headers: { 'Authorization': `Bearer ${token}` } });
+      const url = searchQuery 
+        ? `http://${window.location.hostname}:8000/admin/users?search=${encodeURIComponent(searchQuery)}`
+        : `http://${window.location.hostname}:8000/admin/users`;
+      const res = await fetch(url, { headers: { 'Authorization': `Bearer ${token}` } });
       if (res.ok) setUsers(await res.json());
     } finally { setLoading(false); }
   };
@@ -131,7 +135,13 @@ export default function AdminDashboard() {
   };
 
   useEffect(() => {
-    fetchUsers();
+    const delayDebounceFn = setTimeout(() => {
+      fetchUsers();
+    }, 300);
+    return () => clearTimeout(delayDebounceFn);
+  }, [searchQuery]);
+
+  useEffect(() => {
     fetchCases();
     fetchAuditLogs();
   }, []);
@@ -189,12 +199,13 @@ export default function AdminDashboard() {
       const res = await fetch(url, { method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` } });
       if (res.ok) {
         deleteConfirm.type === 'user' ? fetchUsers() : fetchCases();
+        setDeleteConfirm({ open: false, type: null, id: null });
       } else {
         const data = await res.json().catch(() => ({}));
         alert(`Failed to delete: ${data.detail || 'Unknown error'}`);
+        setDeleteConfirm({ open: false, type: null, id: null });
       }
-      setDeleteConfirm({ open: false, type: null, id: null });
-    } catch (e) { alert('Network error during deletion.'); }
+    } catch (e) { alert('Network error during deletion.'); setDeleteConfirm({ open: false, type: null, id: null }); }
     finally { setIsDeleting(false); }
   };
 
@@ -287,9 +298,16 @@ export default function AdminDashboard() {
         {/* ─── TAB 0: USERS & HIERARCHY ─────────────── */}
         <TabPanel value={tabValue} index={0}>
           <Box sx={{ px: 3, pb: 3 }}>
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 2 }}>
-              <Typography variant="h6" sx={{ fontWeight: 700 }}>User Management & Clearance Levels</Typography>
-              <Box sx={{ display: 'flex', gap: 1 }}>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 2, gap: 2 }}>
+              <Typography variant="h6" sx={{ fontWeight: 700, flexShrink: 0 }}>User Management & Clearance Levels</Typography>
+              <Box sx={{ display: 'flex', gap: 1, flex: 1, justifyContent: 'flex-end' }}>
+                <TextField 
+                  size="small" 
+                  placeholder="Search users..." 
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  sx={{ width: 250 }}
+                />
                 <Button variant="outlined" startIcon={<RefreshRounded />} onClick={fetchUsers}>Refresh</Button>
                 <Button variant="contained" startIcon={<PersonAddRounded />} onClick={() => setOpenAddUser(true)}>Add User</Button>
               </Box>
@@ -299,6 +317,7 @@ export default function AdminDashboard() {
               <Table>
                 <TableHead>
                   <TableRow>
+                    <TableCell>User ID</TableCell>
                     <TableCell>User</TableCell>
                     <TableCell>Department</TableCell>
                     <TableCell>Role</TableCell>
@@ -310,6 +329,11 @@ export default function AdminDashboard() {
                 <TableBody>
                   {users.map((u) => (
                     <TableRow key={u.id} hover>
+                      <TableCell>
+                        <Typography variant="body2" sx={{ fontWeight: 600, fontFamily: 'monospace' }}>
+                          {u.public_id || '—'}
+                        </Typography>
+                      </TableCell>
                       <TableCell>
                         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
                           <Avatar sx={{ width: 32, height: 32, fontSize: 12, bgcolor: 'primary.main' }}>
@@ -334,8 +358,6 @@ export default function AdminDashboard() {
                           label={u.is_active ? 'Active' : 'Disabled'}
                           color={u.is_active ? 'success' : 'error'}
                           size="small"
-                          onClick={() => handleToggleUserStatus(u)}
-                          sx={{ cursor: 'pointer' }}
                         />
                       </TableCell>
                       <TableCell align="right">
@@ -344,7 +366,21 @@ export default function AdminDashboard() {
                             <EditRounded fontSize="small" />
                           </IconButton>
                         </Tooltip>
-                        <Tooltip title="Delete user">
+                        {!u.is_active && (
+                          <Tooltip title="Enable User">
+                            <Button size="small" variant="text" color="success" onClick={() => handleToggleUserStatus(u)}>
+                              Enable
+                            </Button>
+                          </Tooltip>
+                        )}
+                        {u.is_active && (
+                          <Tooltip title="Disable User">
+                            <Button size="small" variant="text" color="warning" onClick={() => handleToggleUserStatus(u)}>
+                              Disable
+                            </Button>
+                          </Tooltip>
+                        )}
+                        <Tooltip title="Permanently Delete User">
                           <IconButton size="small" color="error" onClick={() => confirmDelete('user', u.id)}>
                             <DeleteRounded fontSize="small" />
                           </IconButton>
@@ -352,7 +388,7 @@ export default function AdminDashboard() {
                       </TableCell>
                     </TableRow>
                   ))}
-                  {users.length === 0 && <TableRow><TableCell colSpan={6} align="center">No users found</TableCell></TableRow>}
+                  {users.length === 0 && <TableRow><TableCell colSpan={7} align="center">No users found</TableCell></TableRow>}
                 </TableBody>
               </Table>
             </TableContainer>
@@ -593,11 +629,19 @@ export default function AdminDashboard() {
 
       {/* ─── DELETE CONFIRM DIALOG ─────────────────── */}
       <Dialog open={deleteConfirm.open} onClose={() => setDeleteConfirm({ open: false, type: null, id: null })} maxWidth="xs" fullWidth>
-        <DialogTitle>Confirm Deletion</DialogTitle>
+        <DialogTitle>{deleteConfirm.type === 'user' ? 'Permanently Delete User' : 'Confirm Deletion'}</DialogTitle>
         <DialogContent dividers>
-          <Typography>
-            Are you sure you want to permanently delete this {deleteConfirm.type}? This action cannot be undone and may affect associated records.
-          </Typography>
+          {deleteConfirm.type === 'user' ? (
+            <Typography>
+              This action cannot be undone.<br /><br />
+              The user's account will be permanently removed, but historical cases, documents, permissions, and audit records will be preserved.<br /><br />
+              Are you sure?
+            </Typography>
+          ) : (
+            <Typography>
+              Are you sure you want to permanently delete this {deleteConfirm.type}? This action cannot be undone and may affect associated records.
+            </Typography>
+          )}
         </DialogContent>
         <DialogActions sx={{ p: 2 }}>
           <Button onClick={() => setDeleteConfirm({ open: false, type: null, id: null })} color="inherit" disabled={isDeleting}>Cancel</Button>
