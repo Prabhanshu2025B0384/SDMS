@@ -144,3 +144,39 @@ async def signup(
         "clearance_level": new_user.clearance_level
     }
 
+
+@router.get("/search")
+async def search_users(
+    q: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    from sqlalchemy import or_, and_
+    if not q or len(q) < 2:
+        return []
+    
+    query = select(User).where(
+        and_(
+            User.is_active == True,
+            User.is_deleted == False,
+            or_(
+                User.email.ilike(f"%{q}%"),
+                User.department.ilike(f"%{q}%"),
+                User.role.ilike(f"%{q}%")
+            )
+        )
+    ).limit(20)
+    
+    result = await db.execute(query)
+    users = result.scalars().all()
+    
+    return [
+        {
+            "id": str(u.id),
+            "email": u.email,
+            "role": u.role,
+            "department": u.department,
+            "clearance_level": u.clearance_level or 1
+        }
+        for u in users
+    ]

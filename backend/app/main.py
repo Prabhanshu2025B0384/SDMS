@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.future import select
 
-from app.api import admin, auth, cases, documents, search
+from app.api import admin, auth, cases, documents, search, notifications
 from app.core.security import get_password_hash
 from app.core.storage import ensure_storage_ready
 from app.database import AsyncSessionLocal, Base, engine
@@ -71,8 +71,8 @@ app.include_router(documents.router)
 app.include_router(search.router)
 app.include_router(cases.router)
 app.include_router(admin.router)
+app.include_router(notifications.router)
 
 @app.get("/")
 async def root():
     return {"message": "Secure DMS Zero-Cost API is running"}
-

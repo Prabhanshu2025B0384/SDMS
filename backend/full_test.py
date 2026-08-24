@@ -90,7 +90,11 @@ async def run_tests():
         log("Document versions list", "200", resp.status_code, "PASS" if resp.status_code == 200 else "FAIL")
         
         # Approval workflow
-        resp = await client.post(f"/documents/{doc_id}/status", json={"status": "SUBMITTED"}, headers=headers)
+        # Fetch current user to act as reviewer for testing purposes
+        me_resp = await client.get("/auth/me", headers=headers)
+        me_data = me_resp.json()
+        
+        resp = await client.post(f"/documents/{doc_id}/status", json={"status": "SUBMITTED", "reviewer_id": me_data["id"]}, headers=headers)
         log("Approval workflow - SUBMITTED", "200", resp.status_code, "PASS" if resp.status_code == 200 else "FAIL")
 
         # Integrity verification

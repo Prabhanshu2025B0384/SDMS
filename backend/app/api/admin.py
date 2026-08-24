@@ -114,7 +114,12 @@ async def create_user(payload: UserCreate, db: AsyncSession = Depends(get_db)):
 
 
 @router.patch("/users/{user_id}")
-async def update_user(user_id: str, payload: UserUpdate, db: AsyncSession = Depends(get_db)):
+async def update_user(
+    user_id: str, 
+    payload: UserUpdate, 
+    db: AsyncSession = Depends(get_db), 
+    current_user: User = Depends(get_current_user)
+):
     result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
     if not user:
@@ -131,6 +136,13 @@ async def update_user(user_id: str, payload: UserUpdate, db: AsyncSession = Depe
     if payload.clearance_level is not None:
         user.clearance_level = max(1, min(5, payload.clearance_level))
     if payload.is_active is not None:
+        if payload.is_active is False:
+            if user_id == str(current_user.id):
+                raise HTTPException(status_code=400, detail="Cannot deactivate your own active session.")
+            if user.role == "Admin" and user.is_active:
+                admin_count = await db.scalar(select(func.count(User.id)).where(User.role == "Admin", User.is_active == True))
+                if admin_count <= 1:
+                    raise HTTPException(status_code=400, detail="Cannot deactivate the last active administrator.")
         user.is_active = payload.is_active
 
     await db.commit()
@@ -361,3 +373,64 @@ async def list_audit_logs(
             for l in logs
         ]
     }
+
+
+@router.get("/audit-logs/verify-chain")
+async def verify_audit_chain(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(RoleChecker(["MANAGE_USERS"]))
+):
+    from app.core.authorization import RoleChecker
+    
+    import json
+    import hashlib
+    
+    query = select(AuditLog).order_by(AuditLog.timestamp.asc(), AuditLog.id.asc())
+    result = await db.execute(query)
+    logs = result.scalars().all()
+    
+    expected_previous_hash = None
+    
+    for log in logs:
+        # 1. Verify previous_hash link
+        if log.previous_hash != expected_previous_hash:
+            return {
+                "status": "BROKEN",
+                "broken_at_id": str(log.id),
+                "reason": f"previous_hash mismatch. Expected {expected_previous_hash}, got {log.previous_hash}"
+            }
+            
+        # 2. Recalculate current_hash
+        payload_dict = {
+            "id": str(log.id),
+            "timestamp": log.timestamp.isoformat(),
+            "action": log.action,
+            "user_id": str(log.user_id) if log.user_id else None,
+            "document_id": str(log.document_id) if log.document_id else None,
+            "case_id": str(log.case_id) if log.case_id else None,
+            "result": log.result,
+            "details": log.details or {},
+            "previous_hash": log.previous_hash
+        }
+        
+        canonical_payload = json.dumps(payload_dict, sort_keys=True, separators=(',', ':'))
+        sha256_hash = hashlib.sha256()
+        sha256_hash.update(canonical_payload.encode('utf-8'))
+        calculated_hash = sha256_hash.hexdigest()
+        
+        if calculated_hash != log.current_hash:
+            return {
+                "status": "BROKEN",
+                "broken_at_id": str(log.id),
+                "reason": f"current_hash mismatch. Data has been modified."
+            }
+            
+        expected_previous_hash = log.current_hash
+        
+    return {
+        "status": "VALID",
+        "broken_at_id": None,
+        "reason": None,
+        "total_verified": len(logs)
+    }
+

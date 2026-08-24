@@ -22,7 +22,12 @@ import {
   CircularProgress,
   MenuItem,
   Stack,
-  Alert
+  Alert,
+  Autocomplete,
+  RadioGroup,
+  Radio,
+  FormControlLabel,
+  FormControl
 } from '@mui/material';
 import { 
   AddRounded, 
@@ -35,7 +40,8 @@ import {
   RefreshRounded,
   AutoAwesomeRounded,
   ShareRounded,
-  ShieldRounded
+  ShieldRounded,
+  CheckCircleRounded
 } from '@mui/icons-material';
 import { useAuth } from '../context/AuthContext';
 import { Link as RouterLink } from 'react-router-dom';
@@ -72,11 +78,24 @@ export default function Documents() {
   const [docType, setDocType] = useState('FIR');
   const [classificationLevel, setClassificationLevel] = useState(1);
   const [uploading, setUploading] = useState(false);
+  
+  // Digital Signatures
+  const [signPassword, setSignPassword] = useState('');
+  const [openSignModal, setOpenSignModal] = useState(false);
+  const [versionToSign, setVersionToSign] = useState<string | null>(null);
+  const [signing, setSigning] = useState(false);
+  
+  const [sigDetails, setSigDetails] = useState<any>(null);
+  const [openSigModal, setOpenSigModal] = useState(false);
+  const [verifyingSig, setVerifyingSig] = useState(false);
   const [loading, setLoading] = useState(false);
   const [uploadError, setUploadError] = useState('');
   
   const [selectedDoc, setSelectedDoc] = useState<any | null>(null);
   const [viewLoading, setViewLoading] = useState(false);
+  
+  const [integrityVerified, setIntegrityVerified] = useState(false);
+  const [integrityError, setIntegrityError] = useState('');
   
   // Share dialog state
   const [shareDoc, setShareDoc] = useState<{ id: string; title: string; classification_level: number } | null>(null);
@@ -87,6 +106,13 @@ export default function Documents() {
   
   const [auditLogs, setAuditLogs] = useState<any[]>([]);
   const [auditLoading, setAuditLoading] = useState(false);
+
+  // Approval Request State
+  const [submitForApproval, setSubmitForApproval] = useState(false);
+  const [reviewerId, setReviewerId] = useState<string | null>(null);
+  const [reviewerSearch, setReviewerSearch] = useState('');
+  const [reviewers, setReviewers] = useState<any[]>([]);
+  const [reviewSubmitMode, setReviewSubmitMode] = useState(false);
 
   const { token } = useAuth();
   const pollIntervalRef = useRef<any>(null);
@@ -105,6 +131,47 @@ export default function Documents() {
       }
     } catch (e) {
       console.error("Failed to fetch cases:", e);
+    }
+  };
+
+  const handleSignDocument = async () => {
+    if (!selectedDoc || !versionToSign || !signPassword) return;
+    setSigning(true);
+    try {
+      const res = await fetch(`http://${window.location.hostname}:8000/documents/${selectedDoc.id}/versions/${versionToSign}/sign`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ password: signPassword })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setOpenSignModal(false);
+        fetchVersions(selectedDoc.id); // Refresh versions to show Signed status
+      } else {
+        window.alert(`Signing failed: ${data.detail || 'Unknown error'}`);
+      }
+    } catch (e) {
+      console.error("Signing failed:", e);
+      window.alert("Signing failed due to a network error.");
+    } finally {
+      setSigning(false);
+      setSignPassword('');
+    }
+  };
+
+  const handleVerifySignature = async (docId: string, versionId: string) => {
+    setVerifyingSig(true);
+    setSigDetails(null);
+    try {
+      const res = await fetch(`http://${window.location.hostname}:8000/documents/${docId}/versions/${versionId}/verify-signature`, { headers: { 'Authorization': `Bearer ${token}` } });
+      const data = await res.json();
+      setSigDetails(data);
+      setOpenSigModal(true);
+    } catch (e) {
+      console.error(e);
+      window.alert("Verification request failed.");
+    } finally {
+      setVerifyingSig(false);
     }
   };
 
@@ -131,6 +198,17 @@ export default function Documents() {
       fetchCases();
     }
   }, [token]);
+
+  useEffect(() => {
+    if (reviewerSearch.length > 1) {
+      fetch(`http://${window.location.hostname}:8000/auth/search?q=${reviewerSearch}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      })
+      .then(res => res.json())
+      .then(data => setReviewers(data))
+      .catch(console.error);
+    }
+  }, [reviewerSearch, token]);
 
   // Polling when any document is in PROCESSING status
   useEffect(() => {
@@ -235,6 +313,9 @@ export default function Documents() {
       formData.append('case_id', caseId);
       formData.append('document_type', docType);
       formData.append('classification_level', classificationLevel.toString());
+      if (submitForApproval && reviewerId) {
+        formData.append('reviewer_id', reviewerId);
+      }
       
       const res = await fetch(`http://${window.location.hostname}:8000/documents/upload`, {
         method: 'POST',
@@ -248,6 +329,8 @@ export default function Documents() {
         setTitle('');
         setClassificationLevel(1);
         setUploadError('');
+        setSubmitForApproval(false);
+        setReviewerId(null);
         fetchDocuments();
       } else {
         const errData = await res.json().catch(() => ({}));
@@ -262,6 +345,8 @@ export default function Documents() {
 
   const handleViewDetails = async (docId: string) => {
     setViewLoading(true);
+    setIntegrityVerified(false);
+    setIntegrityError('');
     try {
       const res = await fetch(`http://${window.location.hostname}:8000/documents/${docId}`, {
         headers: { 'Authorization': `Bearer ${token}` }
@@ -310,7 +395,7 @@ export default function Documents() {
     }
   };
 
-  const handleUpdateStatus = async (status: string, reason?: string) => {
+  const handleUpdateStatus = async (status: string, reason?: string, reviewer_id?: string) => {
     if (!selectedDoc) return;
     try {
       const res = await fetch(`http://${window.location.hostname}:8000/documents/${selectedDoc.id}/status`, {
@@ -319,9 +404,10 @@ export default function Documents() {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify({ status, reason })
+        body: JSON.stringify({ status, reason, reviewer_id })
       });
       if (res.ok) {
+        setReviewSubmitMode(false);
         fetchDocuments();
         handleViewDetails(selectedDoc.id);
       } else {
@@ -335,22 +421,23 @@ export default function Documents() {
 
   const handleVerifyIntegrity = async () => {
     if (!selectedDoc) return;
+    setIntegrityError('');
+    setIntegrityVerified(false);
     try {
       const res = await fetch(`http://${window.location.hostname}:8000/documents/${selectedDoc.id}/verify-integrity`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}` }
       });
       if (res.ok) {
-        const data = await res.json();
-        alert(`Integrity Check: ${data.status}\n\nExpected: ${data.expected_hash}\nActual: ${data.actual_hash}`);
+        setIntegrityVerified(true);
         fetchDocuments();
         fetchVersions(selectedDoc.id);
       } else {
         const err = await res.json();
-        alert(err.detail || 'Verification failed');
+        setIntegrityError(err.detail || 'Verification failed');
       }
     } catch (e) {
-      alert('Error verifying integrity');
+      setIntegrityError('Error verifying integrity');
     }
   };
 
@@ -494,7 +581,7 @@ export default function Documents() {
                 <TableCell>Classification</TableCell>
                 <TableCell>Type</TableCell>
                 <TableCell>Case Reference</TableCell>
-                <TableCell>Processing Status</TableCell>
+                <TableCell>Document Status</TableCell>
                 <TableCell align="right">Actions</TableCell>
               </TableRow>
             </TableHead>
@@ -696,11 +783,33 @@ export default function Documents() {
               <MenuItem value="Court Order">Court Order</MenuItem>
               <MenuItem value="Other">Other / General Document</MenuItem>
             </TextField>
+
+            <FormControl component="fieldset" sx={{ mt: 1 }}>
+              <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1 }}>Approval / Review</Typography>
+              <RadioGroup
+                row
+                value={submitForApproval ? "submit" : "none"}
+                onChange={(e) => setSubmitForApproval(e.target.value === "submit")}
+              >
+                <FormControlLabel value="none" control={<Radio size="small" />} label="No approval required" />
+                <FormControlLabel value="submit" control={<Radio size="small" />} label="Submit for approval" />
+              </RadioGroup>
+            </FormControl>
+
+            {submitForApproval && (
+              <Autocomplete
+                options={reviewers}
+                getOptionLabel={(option) => `${option.email} (${option.role} - L${option.clearance_level})`}
+                onInputChange={(_, newInputValue) => setReviewerSearch(newInputValue)}
+                onChange={(_, newValue) => setReviewerId(newValue ? newValue.id : null)}
+                renderInput={(params) => <TextField {...params} label="Select Reviewer" required helperText="Reviewer must have equal or higher clearance level" />}
+              />
+            )}
           </Box>
         </DialogContent>
         <DialogActions sx={{ p: 2.5 }}>
           <Button onClick={() => setOpen(false)} color="inherit" disabled={uploading}>Cancel</Button>
-          <Button onClick={handleUpload} variant="contained" disabled={!file || !title || !caseId || uploading}>
+          <Button onClick={handleUpload} variant="contained" disabled={!file || !title || !caseId || (submitForApproval && !reviewerId) || uploading}>
             {uploading ? <CircularProgress size={24} color="inherit" /> : 'Start Upload & Extraction'}
           </Button>
         </DialogActions>
@@ -736,13 +845,13 @@ export default function Documents() {
       </Dialog>
 
       {/* Document Details & OCR / Metadata Modal */}
-      <Dialog open={Boolean(selectedDoc)} onClose={() => setSelectedDoc(null)} maxWidth="md" fullWidth>
+      <Dialog open={Boolean(selectedDoc)} onClose={() => { setSelectedDoc(null); setReviewSubmitMode(false); setIntegrityVerified(false); setIntegrityError(''); }} maxWidth="md" fullWidth>
         <DialogTitle sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
             <AutoAwesomeRounded color="primary" />
             <Typography variant="h6" sx={{ fontWeight: 700 }}>{selectedDoc?.title}</Typography>
           </Box>
-          <IconButton onClick={() => setSelectedDoc(null)} size="small"><CloseRounded /></IconButton>
+          <IconButton onClick={() => { setSelectedDoc(null); setReviewSubmitMode(false); setIntegrityVerified(false); setIntegrityError(''); }} size="small"><CloseRounded /></IconButton>
         </DialogTitle>
         <DialogContent dividers>
           {selectedDoc && (
@@ -765,9 +874,25 @@ export default function Documents() {
                 </Alert>
               )}
 
-              <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+              <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', alignItems: 'center' }}>
                 {selectedDoc.status === 'READY' && (
-                  <Button variant="contained" size="small" onClick={() => handleUpdateStatus('SUBMITTED')}>Submit for Review</Button>
+                  !reviewSubmitMode ? (
+                    <Button variant="contained" size="small" onClick={() => setReviewSubmitMode(true)}>Submit for Review</Button>
+                  ) : (
+                    <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+                      <Autocomplete
+                        sx={{ width: 300 }}
+                        size="small"
+                        options={reviewers}
+                        getOptionLabel={(option) => `${option.email} (L${option.clearance_level})`}
+                        onInputChange={(_, newInputValue) => setReviewerSearch(newInputValue)}
+                        onChange={(_, newValue) => setReviewerId(newValue ? newValue.id : null)}
+                        renderInput={(params) => <TextField {...params} label="Select Reviewer" />}
+                      />
+                      <Button variant="contained" size="small" disabled={!reviewerId} onClick={() => handleUpdateStatus('SUBMITTED', undefined, reviewerId as string)}>Confirm</Button>
+                      <Button variant="text" size="small" onClick={() => setReviewSubmitMode(false)}>Cancel</Button>
+                    </Box>
+                  )
                 )}
                 {selectedDoc.status === 'SUBMITTED' && (
                   <Button variant="contained" color="secondary" size="small" onClick={() => handleUpdateStatus('UNDER_REVIEW')}>Start Review</Button>
@@ -784,8 +909,19 @@ export default function Documents() {
                 {selectedDoc.status === 'APPROVED' && (
                   <Button variant="contained" color="warning" size="small" onClick={() => handleUpdateStatus('LOCKED')}>Lock Document</Button>
                 )}
-                <Button variant="outlined" size="small" color="info" onClick={handleVerifyIntegrity} startIcon={<ShieldRounded />}>Verify Integrity</Button>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <Button variant="outlined" size="small" color="info" onClick={handleVerifyIntegrity} startIcon={<ShieldRounded />}>Verify Integrity</Button>
+                  {integrityVerified && (
+                    <Chip icon={<CheckCircleRounded sx={{ fontSize: '16px !important' }} />} label="Integrity Verified" color="success" size="small" sx={{ fontWeight: 700 }} />
+                  )}
+                </Box>
               </Box>
+
+              {integrityError && (
+                <Alert severity="error">
+                  <strong>Verification Failed:</strong> {integrityError}
+                </Alert>
+              )}
 
               {/* Structured Metadata Box */}
               {selectedDoc.structured_data && Object.keys(selectedDoc.structured_data).length > 0 && (
@@ -831,6 +967,7 @@ export default function Documents() {
                           <TableCell>Version</TableCell>
                           <TableCell>Date</TableCell>
                           <TableCell>Integrity</TableCell>
+                          <TableCell>Signature</TableCell>
                           <TableCell>Actions</TableCell>
                         </TableRow>
                       </TableHead>
@@ -840,6 +977,15 @@ export default function Documents() {
                             <TableCell>{v.version_number} {v.is_current && <Chip label="Current" size="small" color="primary" sx={{ ml: 1, height: 20 }} />}</TableCell>
                             <TableCell>{new Date(v.created_at).toLocaleString()}</TableCell>
                             <TableCell>{v.is_tampered ? <Chip label="Tampered" color="error" size="small" sx={{ height: 20 }} /> : <Chip label="Verified" color="success" size="small" sx={{ height: 20 }} />}</TableCell>
+                            <TableCell>
+                              {v.is_signed ? (
+                                <Chip icon={<VerifiedUserRounded sx={{ fontSize: '14px !important' }} />} label="Signed" color="success" size="small" onClick={() => handleVerifySignature(selectedDoc.id, v.id)} sx={{ cursor: 'pointer', height: 20, fontWeight: 700 }} />
+                              ) : (
+                                v.is_current ? (
+                                  <Button size="small" variant="outlined" color="primary" onClick={() => { setVersionToSign(v.id); setOpenSignModal(true); setSignPassword(''); }} sx={{ height: 24, fontSize: '11px' }}>Sign</Button>
+                                ) : null
+                              )}
+                            </TableCell>
                             <TableCell>
                               {!v.is_current && selectedDoc.status !== 'LOCKED' && (
                                 <Button size="small" onClick={() => handleRestoreVersion(v.id)}>Restore</Button>
@@ -895,7 +1041,7 @@ export default function Documents() {
           )}
         </DialogContent>
         <DialogActions sx={{ p: 2 }}>
-          <Button onClick={() => setSelectedDoc(null)} color="inherit">Close</Button>
+          <Button onClick={() => { setSelectedDoc(null); setReviewSubmitMode(false); }} color="inherit">Close</Button>
           {selectedDoc && (
             <Button variant="contained" startIcon={<DownloadRounded />} onClick={() => handleDownload(selectedDoc.id, selectedDoc.title)}>
               Download Original PDF
@@ -963,6 +1109,74 @@ export default function Documents() {
           </Button>
         </DialogActions>
       </Dialog>
+
+      {/* Sign Document Modal */}
+      <Dialog open={openSignModal} onClose={() => setOpenSignModal(false)} maxWidth="xs" fullWidth>
+        <DialogTitle sx={{ fontWeight: 700 }}>Sign Document</DialogTitle>
+        <DialogContent dividers>
+          <Typography variant="body2" sx={{ mb: 2 }}>
+            To cryptographically sign this document version, please authorize by re-entering your password.
+            Your digital signature will be permanently attached to this version.
+          </Typography>
+          <TextField
+            fullWidth
+            type="password"
+            label="Password"
+            value={signPassword}
+            onChange={(e) => setSignPassword(e.target.value)}
+            size="small"
+            onKeyPress={(e) => e.key === 'Enter' && handleSignDocument()}
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setOpenSignModal(false)} color="inherit">Cancel</Button>
+          <Button onClick={handleSignDocument} variant="contained" color="primary" disabled={!signPassword || signing}>
+            {signing ? <CircularProgress size={20} /> : 'Authorize & Sign'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Signature Details Modal */}
+      <Dialog open={openSigModal} onClose={() => setOpenSigModal(false)} maxWidth="sm" fullWidth>
+        <DialogTitle sx={{ fontWeight: 700, display: 'flex', alignItems: 'center', gap: 1 }}>
+          {sigDetails?.status === 'VALID' ? <CheckCircleRounded color="success" /> : <BlockRounded color="error" />}
+          Signature Verification
+        </DialogTitle>
+        <DialogContent dividers>
+          {sigDetails ? (
+            <Stack spacing={2}>
+              <Box>
+                <Typography variant="caption" color="text.secondary">Status</Typography>
+                <Typography variant="body1" sx={{ fontWeight: 700, color: sigDetails.status === 'VALID' ? 'success.main' : 'error.main' }}>
+                  {sigDetails.status}
+                </Typography>
+              </Box>
+              {sigDetails.status === 'VALID' ? (
+                <>
+                  <Box>
+                    <Typography variant="caption" color="text.secondary">Signer</Typography>
+                    <Typography variant="body2" sx={{ fontWeight: 500 }}>{sigDetails.signer}</Typography>
+                  </Box>
+                  <Box>
+                    <Typography variant="caption" color="text.secondary">Timestamp</Typography>
+                    <Typography variant="body2">{new Date(sigDetails.timestamp).toLocaleString()}</Typography>
+                  </Box>
+                  <Box>
+                    <Typography variant="caption" color="text.secondary">Algorithm</Typography>
+                    <Typography variant="body2" sx={{ fontFamily: 'monospace' }}>{sigDetails.algorithm}</Typography>
+                  </Box>
+                </>
+              ) : (
+                <Alert severity="error">{sigDetails.reason}</Alert>
+              )}
+            </Stack>
+          ) : <CircularProgress />}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setOpenSigModal(false)} color="inherit">Close</Button>
+        </DialogActions>
+      </Dialog>
+
     </Box>
   );
 }

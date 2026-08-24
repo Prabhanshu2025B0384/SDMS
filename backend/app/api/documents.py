@@ -79,14 +79,34 @@ async def process_document_background(
             )
             doc = doc_result.scalar_one_or_none()
             if doc:
-                doc.status = "READY"
+                from app.models import ApprovalRequest, Notification
                 # Combine title, type, OCR text, and structured metadata for search
                 meta = extracted.get('structured_data', {})
                 meta_text = " ".join(str(v) for v in meta.values() if v) if isinstance(meta, dict) else ""
                 search_text = f"{doc.title} {doc.document_type} {meta_text} {extracted.get('raw_ocr_text', '')}"
                 doc.search_vector = func.to_tsvector('english', search_text)
+                
+                # Check for pending approval request
+                req_result = await session.execute(
+                    select(ApprovalRequest).where(ApprovalRequest.document_id == doc.id, ApprovalRequest.status == "PENDING")
+                )
+                approval_req = req_result.scalar_one_or_none()
+                
+                if approval_req:
+                    doc.status = "SUBMITTED"
+                    # Notify reviewer
+                    notification = Notification(
+                        id=uuid.uuid4(),
+                        user_id=approval_req.reviewer_id,
+                        message=f"Document '{doc.title}' has been submitted to you for review.",
+                        link=f"/documents?id={doc.id}"
+                    )
+                    session.add(notification)
+                else:
+                    doc.status = "READY"
+                    
                 await session.commit()
-                print(f"Successfully processed document {document_id} to status READY")
+                print(f"Successfully processed document {document_id} to status {doc.status}")
     except Exception as e:
         print(f"Background processing error for {document_id}: {e}")
         try:
@@ -137,6 +157,42 @@ async def get_documents(
             "created_at": doc.created_at.isoformat() if doc.created_at else None
         }
         for doc in docs
+    ]
+
+
+# ─── PENDING REVIEWS ────────────────────────────────────────────────────────
+
+@router.get("/pending-reviews")
+async def get_pending_reviews(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    from app.models import ApprovalRequest, Document
+    query = select(ApprovalRequest, Document, User)\
+        .join(Document, Document.id == ApprovalRequest.document_id)\
+        .join(User, User.id == ApprovalRequest.requester_id)\
+        .where(
+            ApprovalRequest.reviewer_id == current_user.id,
+            ApprovalRequest.status == "PENDING"
+        )\
+        .order_by(ApprovalRequest.created_at.desc())
+        
+    result = await db.execute(query)
+    rows = result.all()
+    
+    return [
+        {
+            "id": str(req.id),
+            "document_id": str(doc.id),
+            "title": doc.title,
+            "document_type": doc.document_type,
+            "classification_level": doc.classification_level,
+            "requester_email": user.email,
+            "created_at": req.created_at.isoformat() if req.created_at else None,
+            "status": req.status,
+            "document_status": doc.status
+        }
+        for req, doc, user in rows
     ]
 
 
@@ -356,6 +412,7 @@ async def upload_document(
     title: str = Form(...),
     document_type: str = Form(...),
     classification_level: int = Form(default=1),
+    reviewer_id: Optional[str] = Form(None),
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
@@ -370,6 +427,14 @@ async def upload_document(
 
     from app.core.authorization import check_case_upload_permission
     await check_case_upload_permission(db, case, current_user)
+
+    if reviewer_id:
+        reviewer_result = await db.execute(select(User).where(User.id == reviewer_id))
+        reviewer = reviewer_result.scalar_one_or_none()
+        if not reviewer or not reviewer.is_active or reviewer.is_deleted:
+            raise HTTPException(status_code=400, detail="Selected reviewer is invalid or inactive.")
+        if (reviewer.clearance_level or 1) < classification_level:
+            raise HTTPException(status_code=400, detail="Reviewer clearance level is lower than the document classification.")
 
     file_bytes = await file.read()
     file_hash = calculate_sha256(file_bytes)
@@ -416,6 +481,18 @@ async def upload_document(
     new_doc.current_version_id = new_version.id
     await db.commit()
 
+    if reviewer_id:
+        from app.models import ApprovalRequest
+        approval_req = ApprovalRequest(
+            id=uuid.uuid4(),
+            document_id=new_doc.id,
+            requester_id=current_user.id,
+            reviewer_id=reviewer.id,
+            status="PENDING"
+        )
+        db.add(approval_req)
+        await db.commit()
+
     # Kick off Background Task
     background_tasks.add_task(
         process_document_background,
@@ -433,7 +510,7 @@ async def upload_document(
         user_id=current_user.id,
         document_id=new_doc.id,
         case_id=case.id,
-        details={"title": title, "classification_level": classification_level, "user_email": current_user.email, "version_number": "1.0"}
+        details={"title": title, "classification_level": classification_level, "user_email": current_user.email, "version_number": "1.0", "reviewer_id": reviewer_id}
     )
     await db.commit()
 
@@ -537,6 +614,10 @@ async def get_document_versions(
     users_result = await db.execute(select(User))
     users_map = {str(u.id): u.email for u in users_result.scalars().all()}
     
+    from app.models import DocumentSignature
+    sig_result = await db.execute(select(DocumentSignature).where(DocumentSignature.document_version_id.in_([v.id for v in versions])))
+    signed_version_ids = {str(sig.document_version_id) for sig in sig_result.scalars().all()}
+    
     return [
         {
             "id": str(v.id),
@@ -545,7 +626,8 @@ async def get_document_versions(
             "created_by": users_map.get(str(v.created_by), "Unknown"),
             "file_hash": v.file_hash,
             "is_tampered": v.is_tampered,
-            "is_current": str(v.id) == str(doc.current_version_id)
+            "is_current": str(v.id) == str(doc.current_version_id),
+            "is_signed": str(v.id) in signed_version_ids
         }
         for v in versions
     ]
@@ -627,6 +709,7 @@ async def restore_document_version(
 class StatusPayload(BaseModel):
     status: str
     reason: Optional[str] = None
+    reviewer_id: Optional[str] = None
 
 
 @router.post("/{document_id}/status")
@@ -656,26 +739,85 @@ async def update_document_status(
     if payload.status not in valid_transitions.get(doc.status, []):
         raise HTTPException(status_code=400, detail=f"Invalid transition from {doc.status} to {payload.status}")
         
+    from app.models import ApprovalRequest, Notification
+    
     if payload.status == "SUBMITTED":
         if "SUBMIT" not in user_perms:
             raise HTTPException(status_code=403, detail="Role not authorized to submit documents")
+        if not payload.reviewer_id:
+            raise HTTPException(status_code=400, detail="Reviewer ID is required to submit for approval")
+            
+        reviewer_result = await db.execute(select(User).where(User.id == payload.reviewer_id))
+        reviewer = reviewer_result.scalar_one_or_none()
+        if not reviewer or not reviewer.is_active:
+            raise HTTPException(status_code=400, detail="Invalid reviewer")
+        if (reviewer.clearance_level or 1) < doc.classification_level:
+            raise HTTPException(status_code=400, detail="Reviewer clearance level too low")
+            
+        approval_req = ApprovalRequest(
+            id=uuid.uuid4(),
+            document_id=doc.id,
+            requester_id=current_user.id,
+            reviewer_id=reviewer.id,
+            status="PENDING"
+        )
+        db.add(approval_req)
+        
+        notification = Notification(
+            id=uuid.uuid4(),
+            user_id=reviewer.id,
+            message=f"Document '{doc.title}' has been submitted to you for review.",
+            link=f"/documents?id={doc.id}"
+        )
+        db.add(notification)
             
     if payload.status in ["UNDER_REVIEW", "APPROVED", "REJECTED", "LOCKED"]:
         if "APPROVE" not in user_perms:
             raise HTTPException(status_code=403, detail="Role not authorized to review documents")
-        case_res = await db.execute(select(Case).where(Case.id == doc.case_id))
-        case = case_res.scalar_one_or_none()
-        if case and str(case.owning_officer_id) == str(current_user.id) and current_user.role != "Admin":
-            raise HTTPException(status_code=403, detail="Investigating officer cannot approve their own document")
+            
+        req_result = await db.execute(
+            select(ApprovalRequest)
+            .where(ApprovalRequest.document_id == doc.id, ApprovalRequest.status == "PENDING")
+            .order_by(ApprovalRequest.created_at.desc())
+        )
+        approval_req = req_result.scalars().first()
+        
+        if approval_req:
+            if str(approval_req.reviewer_id) != str(current_user.id) and current_user.role != "Admin":
+                raise HTTPException(status_code=403, detail="Only the assigned reviewer or Admin can review this document")
+                
+            if payload.status in ["APPROVED", "REJECTED"]:
+                approval_req.status = payload.status
+                approval_req.reviewed_at = datetime.utcnow()
+                approval_req.review_comment = payload.reason
+                
+                # Notify requester
+                action_word = "approved" if payload.status == "APPROVED" else "rejected"
+                notification = Notification(
+                    id=uuid.uuid4(),
+                    user_id=approval_req.requester_id,
+                    message=f"Your document '{doc.title}' was {action_word} by {current_user.email}.",
+                    link=f"/documents?id={doc.id}"
+                )
+                db.add(notification)
+        else:
+            # If no approval request exists but we are transitioning...
+            case_res = await db.execute(select(Case).where(Case.id == doc.case_id))
+            case = case_res.scalar_one_or_none()
+            if case and str(case.owning_officer_id) == str(current_user.id) and current_user.role != "Admin":
+                raise HTTPException(status_code=403, detail="Investigating officer cannot approve their own document")
             
     doc.status = payload.status
     if payload.status == "REJECTED":
+        if not payload.reason:
+            raise HTTPException(status_code=400, detail="Rejection reason is required")
         doc.rejection_reason = payload.reason
         
     await db.commit()
     
     action_map = {
         "SUBMITTED": "DOCUMENT_SUBMITTED",
+        "UNDER_REVIEW": "DOCUMENT_UNDER_REVIEW",
         "APPROVED": "DOCUMENT_APPROVED",
         "REJECTED": "DOCUMENT_DENIED",
         "LOCKED": "DOCUMENT_LOCKED"
@@ -685,6 +827,7 @@ async def update_document_status(
                               details={"new_status": payload.status, "reason": payload.reason})
                               
     return {"message": f"Document status updated to {payload.status}"}
+
 
 
 # ─── INTEGRITY & RETRY ────────────────────────────────────────────────────────
@@ -822,3 +965,212 @@ async def get_document_audit_history(
         }
         for l in logs
     ]
+
+
+# ─── DIGITAL SIGNATURES ───────────────────────────────────────────────────────
+
+@router.post("/{document_id}/versions/{version_id}/sign")
+async def sign_document_version(
+    document_id: str,
+    version_id: str,
+    payload: dict,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    from app.core.authorization import check_document_access
+    from app.core.security import verify_password
+    from app.core.config import settings
+    from app.models import UserKey, DocumentSignature
+    from app.core.audit import log_audit_event
+    from cryptography.hazmat.primitives.asymmetric import rsa, padding, utils
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.fernet import Fernet
+    import base64
+    
+    password = payload.get("password")
+    if not password:
+        raise HTTPException(status_code=400, detail="Password is required for signing authorization.")
+        
+    if not verify_password(password, current_user.password_hash):
+        await log_audit_event(db, "SIGNATURE_ATTEMPT_FAILED", current_user.id, document_id, details={"reason": "Incorrect password", "version": version_id})
+        await db.commit()
+        raise HTTPException(status_code=401, detail="Invalid password.")
+        
+    result = await db.execute(select(Document).where(Document.id == document_id))
+    doc = result.scalar_one_or_none()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+        
+    # Check permissions (requires EDIT)
+    await check_document_access(db, doc, current_user, required_action="EDIT")
+    
+    ver_result = await db.execute(select(DocumentVersion).where(DocumentVersion.id == version_id, DocumentVersion.document_id == document_id))
+    version = ver_result.scalar_one_or_none()
+    if not version:
+        raise HTTPException(status_code=404, detail="Version not found")
+        
+    if str(doc.current_version_id) != str(version.id):
+        raise HTTPException(status_code=400, detail="Only the current version can be signed.")
+        
+    # Check if already signed
+    sig_check = await db.execute(select(DocumentSignature).where(DocumentSignature.document_version_id == version.id))
+    if sig_check.scalar_one_or_none():
+        raise HTTPException(status_code=400, detail="This document version is already signed.")
+        
+    # Integrity Check Before Signing
+    try:
+        file_bytes = get_storage_file(version.storage_path)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"File could not be read: {e}")
+        
+    actual_hash = calculate_sha256(file_bytes)
+    if actual_hash != version.file_hash:
+        await log_audit_event(db, "SIGNATURE_ATTEMPT_FAILED", current_user.id, document_id, doc.case_id, details={"reason": "Integrity check failed before signing."})
+        await db.commit()
+        raise HTTPException(status_code=400, detail="Document integrity verification failed. This document cannot be signed.")
+        
+    # User Key Management
+    uk_result = await db.execute(select(UserKey).where(UserKey.user_id == current_user.id))
+    user_key = uk_result.scalar_one_or_none()
+    
+    import hashlib
+    fernet_key = base64.urlsafe_b64encode(hashlib.sha256(settings.SECRET_KEY.encode('utf-8')).digest())
+    fernet = Fernet(fernet_key)
+    
+    if not user_key:
+        private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        public_key = private_key.public_key()
+        
+        priv_pem = private_key.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.PKCS8,
+            encryption_algorithm=serialization.NoEncryption()
+        )
+        pub_pem = public_key.public_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo
+        )
+        
+        enc_priv = fernet.encrypt(priv_pem).decode('utf-8')
+        
+        user_key = UserKey(
+            user_id=current_user.id,
+            public_key_pem=pub_pem.decode('utf-8'),
+            encrypted_private_key_pem=enc_priv
+        )
+        db.add(user_key)
+        await db.commit()
+        await db.refresh(user_key)
+        
+    # Sign the hash
+    dec_priv_pem = fernet.decrypt(user_key.encrypted_private_key_pem.encode('utf-8'))
+    private_key = serialization.load_pem_private_key(dec_priv_pem, password=None)
+    
+    signature = private_key.sign(
+        bytes.fromhex(actual_hash),
+        padding.PSS(
+            mgf=padding.MGF1(hashes.SHA256()),
+            salt_length=padding.PSS.MAX_LENGTH
+        ),
+        utils.Prehashed(hashes.SHA256())
+    )
+    
+    sig_b64 = base64.b64encode(signature).decode('utf-8')
+    
+    doc_sig = DocumentSignature(
+        document_version_id=version.id,
+        signer_id=current_user.id,
+        document_hash=actual_hash,
+        signature=sig_b64,
+        public_key_pem=user_key.public_key_pem
+    )
+    db.add(doc_sig)
+    
+    await log_audit_event(db, "DOCUMENT_SIGNED", current_user.id, document_id, doc.case_id, details={
+        "version": version.version_number,
+        "document_hash": actual_hash
+    })
+    
+    await db.commit()
+    await db.refresh(doc_sig)
+    
+    return {"message": "Document digitally signed successfully.", "signature_id": str(doc_sig.id)}
+
+
+@router.get("/{document_id}/versions/{version_id}/verify-signature")
+async def verify_document_signature(
+    document_id: str,
+    version_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    from app.core.authorization import check_document_access
+    from app.models import DocumentSignature
+    from app.core.audit import log_audit_event
+    from cryptography.hazmat.primitives.asymmetric import padding, utils
+    from cryptography.hazmat.primitives import hashes, serialization
+    import base64
+    
+    result = await db.execute(select(Document).where(Document.id == document_id))
+    doc = result.scalar_one_or_none()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+        
+    await check_document_access(db, doc, current_user, required_action="VIEW")
+    
+    ver_result = await db.execute(select(DocumentVersion).where(DocumentVersion.id == version_id, DocumentVersion.document_id == document_id))
+    version = ver_result.scalar_one_or_none()
+    if not version:
+        raise HTTPException(status_code=404, detail="Version not found")
+        
+    sig_result = await db.execute(select(DocumentSignature).where(DocumentSignature.document_version_id == version.id))
+    doc_sig = sig_result.scalar_one_or_none()
+    
+    if not doc_sig:
+        return {"status": "UNSIGNED", "message": "No signature found for this version."}
+        
+    # Recalculate file hash
+    try:
+        file_bytes = get_storage_file(version.storage_path)
+    except Exception as e:
+        await log_audit_event(db, "SIGNATURE_VERIFICATION_FAILED", current_user.id, document_id, doc.case_id, details={"reason": "File missing"})
+        await db.commit()
+        return {"status": "INVALID", "reason": "Document file is missing or unreadable."}
+        
+    actual_hash = calculate_sha256(file_bytes)
+    
+    if actual_hash != doc_sig.document_hash:
+        await log_audit_event(db, "SIGNATURE_VERIFICATION_FAILED", current_user.id, document_id, doc.case_id, details={"reason": "Hash mismatch"})
+        await db.commit()
+        return {"status": "INVALID", "reason": "Document has been modified since it was signed."}
+        
+    try:
+        public_key = serialization.load_pem_public_key(doc_sig.public_key_pem.encode('utf-8'))
+        signature_bytes = base64.b64decode(doc_sig.signature)
+        
+        public_key.verify(
+            signature_bytes,
+            bytes.fromhex(actual_hash),
+            padding.PSS(
+                mgf=padding.MGF1(hashes.SHA256()),
+                salt_length=padding.PSS.MAX_LENGTH
+            ),
+            utils.Prehashed(hashes.SHA256())
+        )
+        
+        signer_res = await db.execute(select(User).where(User.id == doc_sig.signer_id))
+        signer = signer_res.scalar_one_or_none()
+        
+        await log_audit_event(db, "SIGNATURE_VERIFIED", current_user.id, document_id, doc.case_id, details={"version": version.version_number})
+        await db.commit()
+        
+        return {
+            "status": "VALID",
+            "signer": signer.email if signer else "Unknown",
+            "timestamp": doc_sig.timestamp.isoformat(),
+            "algorithm": "RSA-PSS-SHA256"
+        }
+    except Exception as e:
+        await log_audit_event(db, "SIGNATURE_VERIFICATION_FAILED", current_user.id, document_id, doc.case_id, details={"reason": "Cryptographic verification failed"})
+        await db.commit()
+        return {"status": "INVALID", "reason": "Cryptographic signature is invalid or corrupted."}

@@ -138,3 +138,50 @@ class AuditLog(Base):
     current_hash = Column(String, nullable=False)
 
 
+class ApprovalRequest(Base):
+    __tablename__ = "approval_requests"
+    id = Column(GUID, primary_key=True, default=uuid.uuid4)
+    document_id = Column(GUID, ForeignKey("documents.id"), nullable=False)
+    requester_id = Column(GUID, ForeignKey("users.id"), nullable=False)
+    reviewer_id = Column(GUID, ForeignKey("users.id"), nullable=False)
+    status = Column(String, default="PENDING") # PENDING, APPROVED, REJECTED
+    created_at = Column(DateTime, default=datetime.utcnow)
+    reviewed_at = Column(DateTime, nullable=True)
+    review_comment = Column(String, nullable=True)
+
+
+class Notification(Base):
+    __tablename__ = "notifications"
+    id = Column(GUID, primary_key=True, default=uuid.uuid4)
+    user_id = Column(GUID, ForeignKey("users.id"), nullable=False)
+    message = Column(String, nullable=False)
+    link = Column(String, nullable=True)
+    is_read = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class UserKey(Base):
+    __tablename__ = "user_keys"
+    id = Column(GUID, primary_key=True, default=uuid.uuid4)
+    user_id = Column(GUID, ForeignKey("users.id"), unique=True, nullable=False)
+    public_key_pem = Column(Text, nullable=False)
+    encrypted_private_key_pem = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    user = relationship("User")
+
+
+class DocumentSignature(Base):
+    __tablename__ = "document_signatures"
+    id = Column(GUID, primary_key=True, default=uuid.uuid4)
+    document_version_id = Column(GUID, ForeignKey("document_versions.id"), unique=True, nullable=False)
+    signer_id = Column(GUID, ForeignKey("users.id"), nullable=False)
+    document_hash = Column(String, nullable=False)
+    signature = Column(Text, nullable=False)  # Hex encoded or Base64 encoded binary
+    public_key_pem = Column(Text, nullable=False)
+    timestamp = Column(DateTime, default=datetime.utcnow)
+
+    document_version = relationship("DocumentVersion")
+    signer = relationship("User")
+
+

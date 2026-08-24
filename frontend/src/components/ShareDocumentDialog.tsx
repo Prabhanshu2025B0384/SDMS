@@ -9,7 +9,7 @@ import {
 } from '@mui/material';
 import {
   ShareRounded, CloseRounded, DeleteRounded, PersonAddRounded,
-  ShieldRounded, CheckCircleRounded
+  ShieldRounded, CheckCircleRounded, SearchRounded
 } from '@mui/icons-material';
 import { useAuth } from '../context/AuthContext';
 
@@ -21,6 +21,7 @@ const PERMISSION_COLORS: Record<string, 'default' | 'info' | 'warning' | 'succes
 
 interface User {
   id: string;
+  public_id?: string;
   email: string;
   role: string;
   clearance_level?: number;
@@ -64,6 +65,7 @@ export default function ShareDocumentDialog({
   const [permissions, setPermissions] = useState<Permission[]>([]);
   const [selectedUsers, setSelectedUsers] = useState<string[]>([]);
   const [permissionType, setPermissionType] = useState<string>('VIEW');
+  const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
@@ -102,6 +104,7 @@ export default function ShareDocumentDialog({
       setError('');
       setSuccess('');
       setSelectedUsers([]);
+      setSearchQuery('');
       setLoading(true);
       Promise.all([fetchPermissions(), fetchUsers()]).finally(() => setLoading(false));
     }
@@ -160,6 +163,16 @@ export default function ShareDocumentDialog({
   const eligibleUsers = allUsers.filter(
     (u) => u.id !== currentUser?.id && !existingUserIds.has(u.id)
   );
+
+  const filteredEligibleUsers = eligibleUsers.filter((u) => {
+    if (!searchQuery) return true;
+    const lowerQuery = searchQuery.toLowerCase();
+    return (
+      u.email.toLowerCase().includes(lowerQuery) ||
+      u.id.toLowerCase().includes(lowerQuery) ||
+      (u.public_id && u.public_id.toLowerCase().includes(lowerQuery))
+    );
+  });
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth slotProps={{ paper: { sx: { borderRadius: 3 } } }}>
@@ -257,6 +270,28 @@ export default function ShareDocumentDialog({
         </FormControl>
 
         {/* Select Users */}
+        <Box sx={{ display: 'flex', alignItems: 'flex-end', mb: 2 }}>
+          <SearchRounded sx={{ color: 'action.active', mr: 1, my: 0.5 }} />
+          <FormControl fullWidth>
+            <input 
+              type="text"
+              placeholder="Search users by email, name, or user ID..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              style={{
+                width: '100%',
+                padding: '8px 0',
+                border: 'none',
+                borderBottom: '1px solid #ccc',
+                outline: 'none',
+                fontSize: '15px',
+                fontFamily: 'inherit',
+                backgroundColor: 'transparent'
+              }}
+            />
+          </FormControl>
+        </Box>
+
         {loading ? (
           <Box sx={{ display: 'flex', justifyContent: 'center', py: 3 }}>
             <CircularProgress size={32} />
@@ -265,9 +300,13 @@ export default function ShareDocumentDialog({
           <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center', py: 2 }}>
             All available users already have access to this document.
           </Typography>
+        ) : filteredEligibleUsers.length === 0 ? (
+          <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center', py: 2 }}>
+            No users found matching your search.
+          </Typography>
         ) : (
           <Box sx={{ maxHeight: 220, overflowY: 'auto', border: '1px solid', borderColor: 'divider', borderRadius: 2 }}>
-            {eligibleUsers.map((u) => (
+            {filteredEligibleUsers.map((u) => (
               <Box
                 key={u.id}
                 sx={{

@@ -9,7 +9,8 @@ import {
   DeleteRounded, EditRounded, VerifiedUserRounded, AdminPanelSettingsRounded,
   PersonAddRounded, ShieldRounded, VisibilityRounded, GetAppRounded,
   UploadFileRounded, LoginRounded, ShareRounded, PeopleRounded,
-  RefreshRounded, SecurityRounded, TimelineRounded
+  RefreshRounded, SecurityRounded, TimelineRounded,
+  BlockRounded, CheckCircleRounded
 } from '@mui/icons-material';
 import { useAuth } from '../context/AuthContext';
 
@@ -31,11 +32,23 @@ const ACTION_ICON: Record<string, any> = {
   UPLOAD: <UploadFileRounded sx={{ fontSize: 16 }} />,
   LOGIN: <LoginRounded sx={{ fontSize: 16 }} />,
   SHARE: <ShareRounded sx={{ fontSize: 16 }} />,
-  PASSWORD_CHANGE: <ShieldRounded sx={{ fontSize: 16 }} />
+  PASSWORD_CHANGE: <ShieldRounded sx={{ fontSize: 16 }} />,
+  DOCUMENT_SIGNED: <VerifiedUserRounded sx={{ fontSize: 16 }} />,
+  SIGNATURE_VERIFIED: <CheckCircleRounded sx={{ fontSize: 16 }} />,
+  SIGNATURE_VERIFICATION_FAILED: <BlockRounded sx={{ fontSize: 16 }} />,
+  SIGNATURE_ATTEMPT_FAILED: <BlockRounded sx={{ fontSize: 16 }} />,
+  UNAUTHORIZED_ACCESS_ATTEMPT: <BlockRounded sx={{ fontSize: 16 }} />,
+  USER_DEACTIVATED: <BlockRounded sx={{ fontSize: 16 }} />,
+  USER_CREATED: <PersonAddRounded sx={{ fontSize: 16 }} />,
+  USER_UPDATED: <EditRounded sx={{ fontSize: 16 }} />
 };
 const ACTION_COLOR: Record<string, 'default' | 'info' | 'warning' | 'success' | 'error' | 'primary' | 'secondary'> = {
   VIEW: 'info', DOWNLOAD: 'warning', UPLOAD: 'success', LOGIN: 'default',
-  SHARE: 'primary', PASSWORD_CHANGE: 'secondary'
+  SHARE: 'primary', PASSWORD_CHANGE: 'secondary',
+  DOCUMENT_SIGNED: 'success', SIGNATURE_VERIFIED: 'success',
+  SIGNATURE_VERIFICATION_FAILED: 'error', SIGNATURE_ATTEMPT_FAILED: 'error',
+  UNAUTHORIZED_ACCESS_ATTEMPT: 'error', USER_DEACTIVATED: 'error',
+  USER_CREATED: 'success', USER_UPDATED: 'info'
 };
 
 function TabPanel(props: { children?: React.ReactNode; index: number; value: number }) {
@@ -69,6 +82,10 @@ export default function AdminDashboard() {
   const [auditData, setAuditData] = useState<{ summary: any; logs: any[] }>({ summary: {}, logs: [] });
   const [loading, setLoading] = useState(false);
   const [auditActionFilter, setAuditActionFilter] = useState('ALL');
+  
+  // Audit Chain Verification
+  const [chainStatus, setChainStatus] = useState<any>(null);
+  const [verifyingChain, setVerifyingChain] = useState(false);
 
   // Add User
   const [openAddUser, setOpenAddUser] = useState(false);
@@ -98,7 +115,7 @@ export default function AdminDashboard() {
   const [selectedOfficerId, setSelectedOfficerId] = useState('');
   const [assigningOfficer, setAssigningOfficer] = useState(false);
 
-  const { token } = useAuth();
+  const { user: currentUser, token } = useAuth();
   const headers = { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' };
 
   const confirmDelete = (type: 'user' | 'case', id: string) => {
@@ -132,6 +149,21 @@ export default function AdminDashboard() {
       const res = await fetch(`http://${window.location.hostname}:8000/admin/audit-logs?${params}`, { headers: { 'Authorization': `Bearer ${token}` } });
       if (res.ok) setAuditData(await res.json());
     } finally { setLoading(false); }
+  };
+
+  const handleVerifyAuditChain = async () => {
+    setVerifyingChain(true);
+    setChainStatus(null);
+    try {
+      const res = await fetch(`http://${window.location.hostname}:8000/admin/audit-logs/verify-chain`, { headers: { 'Authorization': `Bearer ${token}` } });
+      const data = await res.json();
+      setChainStatus(data);
+    } catch (e) {
+      console.error(e);
+      setChainStatus({ status: 'ERROR', reason: 'Failed to verify chain' });
+    } finally {
+      setVerifyingChain(false);
+    }
   };
 
   useEffect(() => {
@@ -215,7 +247,12 @@ export default function AdminDashboard() {
         method: 'PATCH', headers,
         body: JSON.stringify({ is_active: !user.is_active })
       });
-      if (res.ok) fetchUsers();
+      if (res.ok) {
+        fetchUsers();
+      } else {
+        const data = await res.json().catch(() => ({}));
+        alert(`Failed to change status: ${data.detail || 'Unknown error'}`);
+      }
     } catch (e) { alert('Error toggling user status.'); }
   };
 
@@ -367,23 +404,29 @@ export default function AdminDashboard() {
                           </IconButton>
                         </Tooltip>
                         {!u.is_active && (
-                          <Tooltip title="Enable User">
-                            <Button size="small" variant="text" color="success" onClick={() => handleToggleUserStatus(u)}>
-                              Enable
-                            </Button>
+                          <Tooltip title={u.id === currentUser?.id ? "Cannot modify your own status" : "Enable User"}>
+                            <span>
+                              <IconButton size="small" color="success" onClick={() => handleToggleUserStatus(u)} disabled={u.id === currentUser?.id}>
+                                <CheckCircleRounded fontSize="small" />
+                              </IconButton>
+                            </span>
                           </Tooltip>
                         )}
                         {u.is_active && (
-                          <Tooltip title="Disable User">
-                            <Button size="small" variant="text" color="warning" onClick={() => handleToggleUserStatus(u)}>
-                              Disable
-                            </Button>
+                          <Tooltip title={u.id === currentUser?.id ? "Cannot modify your own status" : "Disable User"}>
+                            <span>
+                              <IconButton size="small" color="warning" onClick={() => handleToggleUserStatus(u)} disabled={u.id === currentUser?.id}>
+                                <BlockRounded fontSize="small" />
+                              </IconButton>
+                            </span>
                           </Tooltip>
                         )}
-                        <Tooltip title="Permanently Delete User">
-                          <IconButton size="small" color="error" onClick={() => confirmDelete('user', u.id)}>
-                            <DeleteRounded fontSize="small" />
-                          </IconButton>
+                        <Tooltip title={u.id === currentUser?.id ? "Cannot delete your own account" : "Permanently Delete User"}>
+                          <span>
+                            <IconButton size="small" color="error" onClick={() => confirmDelete('user', u.id)} disabled={u.id === currentUser?.id}>
+                              <DeleteRounded fontSize="small" />
+                            </IconButton>
+                          </span>
                         </Tooltip>
                       </TableCell>
                     </TableRow>
@@ -483,7 +526,7 @@ export default function AdminDashboard() {
             {/* Filter */}
             <Box sx={{ display: 'flex', gap: 1.5, mb: 2, flexWrap: 'wrap', alignItems: 'center' }}>
               <Typography variant="subtitle2">Filter by action:</Typography>
-              {['ALL', 'VIEW', 'DOWNLOAD', 'UPLOAD', 'LOGIN', 'SHARE', 'PASSWORD_CHANGE'].map((a) => (
+              {['ALL', 'VIEW', 'DOWNLOAD', 'UPLOAD', 'LOGIN', 'SHARE', 'PASSWORD_CHANGE', 'DOCUMENT_SIGNED', 'SIGNATURE_VERIFIED', 'SIGNATURE_VERIFICATION_FAILED', 'SIGNATURE_ATTEMPT_FAILED', 'UNAUTHORIZED_ACCESS_ATTEMPT', 'USER_DEACTIVATED'].map((a) => (
                 <Chip
                   key={a}
                   label={a}
@@ -495,12 +538,30 @@ export default function AdminDashboard() {
                 />
               ))}
               <Button size="small" startIcon={<RefreshRounded />} variant="outlined" onClick={() => fetchAuditLogs(auditActionFilter)}>Refresh</Button>
+              <Box sx={{ flexGrow: 1 }} />
+              <Button 
+                size="small" 
+                startIcon={<SecurityRounded />} 
+                variant="contained" 
+                color="info" 
+                onClick={handleVerifyAuditChain}
+                disabled={verifyingChain}
+              >
+                {verifyingChain ? 'Verifying...' : 'Verify Audit Chain'}
+              </Button>
+              {chainStatus && (
+                chainStatus.status === 'VALID' ? (
+                  <Chip icon={<CheckCircleRounded sx={{ fontSize: '16px !important' }} />} label="Audit Chain Verified" color="success" size="small" sx={{ fontWeight: 700 }} />
+                ) : (
+                  <Chip icon={<BlockRounded sx={{ fontSize: '16px !important' }} />} label={`Chain Broken: ${chainStatus.reason || 'Unknown error'}`} color="error" size="small" sx={{ fontWeight: 700 }} />
+                )
+              )}
             </Box>
 
             {/* Logs Table */}
             <TableContainer sx={{ maxHeight: 480 }}>
               <Table stickyHeader size="small">
-                <TableHead>
+                <TableHead sx={{ '& th': { bgcolor: 'background.paper', zIndex: 2 } }}>
                   <TableRow>
                     <TableCell>Timestamp</TableCell>
                     <TableCell>Action</TableCell>

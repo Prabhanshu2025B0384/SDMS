@@ -22,7 +22,8 @@ import {
   TableCell,
   TableContainer,
   TableHead,
-  TableRow
+  TableRow,
+  Alert
 } from '@mui/material';
 import { 
   SearchRounded, 
@@ -31,7 +32,8 @@ import {
   VisibilityRounded, 
   CloseRounded,
   ShieldRounded,
-  AutoAwesomeRounded
+  AutoAwesomeRounded,
+  CheckCircleRounded
 } from '@mui/icons-material';
 import { useAuth } from '../context/AuthContext';
 
@@ -135,6 +137,7 @@ export default function Search() {
   const handleVerifyIntegrity = async () => {
     if (!selectedDoc) return;
     setVerifyingIntegrity(true);
+    setIntegrityResult(null);
     try {
       const res = await fetch(`http://${window.location.hostname}:8000/documents/${selectedDoc.id}/verify-integrity`, {
         method: 'POST',
@@ -147,10 +150,10 @@ export default function Search() {
         fetchAuditHistory(selectedDoc.id);
       } else {
         const err = await res.json();
-        alert(err.detail || 'Verification failed');
+        setIntegrityResult({ status: 'FAILED', error: err.detail || 'Verification failed' });
       }
     } catch (e) {
-      alert('Error verifying integrity');
+      setIntegrityResult({ status: 'FAILED', error: 'Error verifying integrity' });
     } finally {
       setVerifyingIntegrity(false);
     }
@@ -375,9 +378,13 @@ export default function Search() {
                     </Button>
                     
                     {integrityResult && (
-                      <Typography variant="body2" color={integrityResult.status === 'VERIFIED' ? 'success.main' : 'error.main'} sx={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                        {integrityResult.status === 'VERIFIED' ? '✓ Document Integrity Verified' : '✗ Integrity Check Failed'}
-                      </Typography>
+                      integrityResult.status === 'VERIFIED' ? (
+                        <Chip icon={<CheckCircleRounded sx={{ fontSize: '16px !important' }} />} label="Integrity Verified" color="success" size="small" sx={{ fontWeight: 700 }} />
+                      ) : (
+                        <Alert severity="error" sx={{ py: 0, '& .MuiAlert-message': { py: 1 } }}>
+                          <strong>Verification Failed:</strong> {integrityResult.error || 'Integrity Check Failed'}
+                        </Alert>
+                      )
                     )}
                   </Box>
                 </Card>

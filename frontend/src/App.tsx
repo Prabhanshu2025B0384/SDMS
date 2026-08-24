@@ -4,6 +4,7 @@ import Documents from './pages/Documents';
 import Search from './pages/Search';
 import AdminDashboard from './pages/AdminDashboard';
 import Login from './pages/Login';
+import PendingReviews from './pages/PendingReviews';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import ProtectedRoute from './components/ProtectedRoute';
 import ProfileModal from './components/ProfileModal';
@@ -22,7 +23,10 @@ import {
   Avatar,
   Button,
   Chip,
-  Tooltip
+  Tooltip,
+  Menu,
+  MenuItem,
+  Badge
 } from '@mui/material';
 import {
   FolderRounded,
@@ -31,8 +35,11 @@ import {
   AdminPanelSettingsRounded,
   LogoutRounded,
   ShieldRounded,
-  AccountCircleRounded
+  AccountCircleRounded,
+  PendingActionsRounded
 } from '@mui/icons-material';
+import { useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 
 const DRAWER_WIDTH = 280;
 
@@ -50,6 +57,7 @@ function Sidebar({ mobileOpen, onClose, onProfileClick }: { mobileOpen: boolean;
   const menuItems = [
     { title: 'Documents', path: '/documents', icon: <FolderRounded /> },
     { title: 'Search', path: '/search', icon: <SearchRounded /> },
+    { title: 'Pending Reviews', path: '/pending-reviews', icon: <PendingActionsRounded /> },
   ];
 
   if (user?.role === 'Admin') {
@@ -171,8 +179,38 @@ function Sidebar({ mobileOpen, onClose, onProfileClick }: { mobileOpen: boolean;
 }
 
 function Topbar({ onMenuClick, onProfileClick }: { onMenuClick: () => void; onProfileClick: () => void }) {
-  const { user } = useAuth();
+  const { user, token } = useAuth();
   const clearanceLevel = user?.clearance_level || 1;
+  const navigate = useNavigate();
+  const [notifications, setNotifications] = useState<any[]>([]);
+  const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
+
+  useEffect(() => {
+    if (user && token) {
+      fetch(`http://${window.location.hostname}:8000/notifications`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      })
+      .then(res => res.json())
+      .then(data => setNotifications(data))
+      .catch(console.error);
+    }
+  }, [user, token]);
+
+  const handleNotificationClick = async (notif: any) => {
+    try {
+      await fetch(`http://${window.location.hostname}:8000/notifications/${notif.id}/read`, {
+        method: 'PATCH',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      setNotifications(prev => prev.filter(n => n.id !== notif.id));
+      setAnchorEl(null);
+      if (notif.link) {
+        navigate(notif.link);
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
 
   return (
     <AppBar position="fixed" sx={{ width: { md: `calc(100% - ${DRAWER_WIDTH}px)` }, ml: { md: `${DRAWER_WIDTH}px` } }}>
@@ -193,7 +231,27 @@ function Topbar({ onMenuClick, onProfileClick }: { onMenuClick: () => void; onPr
           color={CLEARANCE_COLORS[clearanceLevel]}
           sx={{ mr: 2, fontWeight: 700 }}
         />
-        <IconButton sx={{ color: 'text.secondary' }}><NotificationsRounded /></IconButton>
+        <IconButton sx={{ color: 'text.secondary' }} onClick={(e) => setAnchorEl(e.currentTarget)}>
+          <Badge badgeContent={notifications.length} color="error">
+            <NotificationsRounded />
+          </Badge>
+        </IconButton>
+        <Menu
+          anchorEl={anchorEl}
+          open={Boolean(anchorEl)}
+          onClose={() => setAnchorEl(null)}
+          sx={{ '& .MuiPaper-root': { width: 320, maxHeight: 400 } }}
+        >
+          {notifications.length === 0 ? (
+            <MenuItem disabled>No new notifications</MenuItem>
+          ) : (
+            notifications.map(n => (
+              <MenuItem key={n.id} onClick={() => handleNotificationClick(n)} sx={{ whiteSpace: 'normal' }}>
+                <Typography variant="body2">{n.message}</Typography>
+              </MenuItem>
+            ))
+          )}
+        </Menu>
         <Tooltip title="My Profile & Password">
           <IconButton sx={{ ml: 1 }} onClick={onProfileClick}>
             <Avatar sx={{ width: 36, height: 36, bgcolor: 'primary.main', fontSize: 13, fontWeight: 700 }}>
@@ -220,6 +278,7 @@ function AuthenticatedLayout() {
           <Route element={<ProtectedRoute />}>
             <Route path="/documents" element={<Documents />} />
             <Route path="/search" element={<Search />} />
+            <Route path="/pending-reviews" element={<PendingReviews />} />
           </Route>
 
           <Route element={<ProtectedRoute requiredRole="Admin" />}>
