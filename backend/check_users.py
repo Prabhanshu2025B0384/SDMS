@@ -3,7 +3,7 @@ from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy import text
 
 async def check_admin_status():
-    engine = create_async_engine('postgresql+asyncpg://postgres:root@localhost:5432/secure_dms')
+    engine = create_async_engine('postgresql+asyncpg://postgres.vshsmnrzeusimlcemzhc:W2072abcW20@aws-0-ap-southeast-1.pooler.supabase.com:5432/postgres')
     async with engine.connect() as conn:
         result = await conn.execute(text("SELECT email, is_active, is_deleted FROM users WHERE email='admin@gmail.com'"))
         row = result.fetchone()
