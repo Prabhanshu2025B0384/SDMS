@@ -185,7 +185,7 @@ def get_authorized_document_filter(user: User):
     Returns a SQLAlchemy filter condition for Document queries that enforces the exact
     authorization rules defined in check_document_access().
     """
-    from sqlalchemy import or_, and_
+    from sqlalchemy import or_, and_, func
     from app.models import Document, Case, CaseAssignment, DocumentPermission
     
     # 1. Admin or Executive clearance gets everything
@@ -210,7 +210,7 @@ def get_authorized_document_filter(user: User):
         
         # Condition B: Meets clearance AND (owns case OR assigned to case)
         and_(
-            Document.classification_level <= user_clearance,
+            func.coalesce(Document.classification_level, 1) <= user_clearance,
             or_(
                 Case.owning_officer_id == user.id,
                 Document.case_id.in_(case_assigned_subq)
@@ -219,7 +219,7 @@ def get_authorized_document_filter(user: User):
         
         # Condition C: Classification is 1 AND user has one of the roles
         and_(
-            Document.classification_level == 1,
+            func.coalesce(Document.classification_level, 1) == 1,
             user.role in ["Investigating Officer", "Senior Officer", "Prosecutor"]
         )
     )

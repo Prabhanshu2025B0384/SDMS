@@ -410,7 +410,7 @@ async def share_document(
                 id=uuid.uuid4(),
                 user_id=uid,
                 message=f"You received {payload.permission_type} access to '{doc.title}' from {current_user.email}.",
-                link=f"/documents?id={doc.id}"
+                link=f"/shared-documents?id={doc.id}"
             )
             db.add(notification)
 

@@ -46,7 +46,7 @@ import {
   BlockRounded
 } from '@mui/icons-material';
 import { useAuth } from '../context/AuthContext';
-import { Link as RouterLink } from 'react-router-dom';
+import { Link as RouterLink, useLocation } from 'react-router-dom';
 import ShareDocumentDialog from '../components/ShareDocumentDialog';
 
 const CLEARANCE_COLORS: Record<number, 'default' | 'info' | 'warning' | 'error' | 'success'> = {
@@ -117,6 +117,7 @@ export default function Documents() {
 
   const { token } = useAuth();
   const pollIntervalRef = useRef<any>(null);
+  const location = useLocation();
 
   const fetchCases = async () => {
     try {
@@ -196,6 +197,17 @@ export default function Documents() {
       fetchCases();
     }
   }, [token]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const docId = params.get('id');
+    if (docId && documents.length > 0) {
+      // Check if it's not already opened
+      if (!selectedDoc || selectedDoc.id !== docId) {
+        handleViewDetails(docId);
+      }
+    }
+  }, [location.search, documents]);
 
   useEffect(() => {
     if (reviewerSearch.length > 1) {
@@ -896,23 +908,26 @@ export default function Documents() {
                   <Button variant="contained" color="secondary" size="small" onClick={() => handleUpdateStatus('UNDER_REVIEW')}>Start Review</Button>
                 )}
                 {selectedDoc.status === 'UNDER_REVIEW' && (
-                  <>
-                    <Button variant="contained" color="success" size="small" onClick={() => handleUpdateStatus('APPROVED')}>Approve</Button>
-                    <Button variant="contained" color="error" size="small" onClick={() => {
+                  <Box sx={{ display: 'flex', gap: 1 }}>
+                    <Button variant="outlined" size="small" color="info" onClick={handleVerifyIntegrity} startIcon={<ShieldRounded />}>Verify Integrity</Button>
+                    <Button variant="contained" size="small" color="success" onClick={() => handleUpdateStatus('APPROVED')}>Verify / Mark as Reviewed</Button>
+                    <Button variant="outlined" size="small" color="error" onClick={() => {
                         const reason = window.prompt("Enter rejection reason:");
                         if (reason) handleUpdateStatus('REJECTED', reason);
                     }}>Reject</Button>
-                  </>
+                  </Box>
                 )}
                 {selectedDoc.status === 'APPROVED' && (
                   <Button variant="contained" color="warning" size="small" onClick={() => handleUpdateStatus('LOCKED')}>Lock Document</Button>
                 )}
+                {selectedDoc.status !== 'UNDER_REVIEW' && (
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                   <Button variant="outlined" size="small" color="info" onClick={handleVerifyIntegrity} startIcon={<ShieldRounded />}>Verify Integrity</Button>
                   {integrityVerified && (
                     <Chip icon={<CheckCircleRounded sx={{ fontSize: '16px !important' }} />} label="Integrity Verified" color="success" size="small" sx={{ fontWeight: 700 }} />
                   )}
                 </Box>
+                )}
               </Box>
 
               {integrityError && (

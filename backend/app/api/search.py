@@ -74,6 +74,7 @@ async def search_documents(
             "id": str(doc.id),
             "title": doc.title,
             "document_type": doc.document_type,
+            "classification_level": doc.classification_level or 1,
             "status": doc.status,
             "case_id": str(doc.case_id),
             "created_at": doc.created_at.isoformat() if doc.created_at else None,
