@@ -115,6 +115,7 @@ export default function ProfileModal({ open, onClose }: ProfileModalProps) {
           <Box sx={{ flexGrow: 1 }}>
             <Typography variant="h6" sx={{ fontWeight: 700, color: 'inherit' }}>{user?.email?.split('@')[0]}</Typography>
             <Typography variant="body2" sx={{ opacity: 0.8, mb: 0.5 }}>{user?.email}</Typography>
+            <Typography variant="caption" sx={{ opacity: 0.9, mb: 1, display: 'block', fontFamily: 'monospace', fontWeight: 600 }}>User ID: {user?.id || '—'}</Typography>
             <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
               <Chip label={user?.role || 'Officer'} size="small" sx={{ bgcolor: 'rgba(255,255,255,0.25)', color: 'white', fontWeight: 600, fontSize: 11 }} />
               <Chip

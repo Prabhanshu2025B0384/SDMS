@@ -1,3 +1,4 @@
+import os
 import uuid
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
@@ -20,15 +21,19 @@ async def lifespan(app: FastAPI):
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
-    # 3. Seed initial admin and demo case
+    # 3. Seed initial admin
     async with AsyncSessionLocal() as db:
-        admin_res = await db.execute(select(User).where(User.email == "admin12032008@gmail.com"))
+        admin_email = os.getenv("INITIAL_ADMIN_EMAIL", "admin@gmail.com")
+        admin_password = os.getenv("INITIAL_ADMIN_PASSWORD", "admin")
+        
+        admin_res = await db.execute(select(User).where(User.email == admin_email))
         admin_user = admin_res.scalar_one_or_none()
+        
         if not admin_user:
             admin_user = User(
                 id=uuid.uuid4(),
-                email="admin12032008@gmail.com",
-                password_hash=get_password_hash("adminhumai"),
+                email=admin_email,
+                password_hash=get_password_hash(admin_password),
                 department="System Admin",
                 role="Admin",
                 clearance_level=5,
@@ -37,24 +42,10 @@ async def lifespan(app: FastAPI):
             db.add(admin_user)
             await db.commit()
             await db.refresh(admin_user)
-            print("Initialized default Admin user: admin12032008@gmail.com")
+            print(f"Initialized default Admin user: {admin_email}")
         elif admin_user.clearance_level != 5:
             admin_user.clearance_level = 5
             await db.commit()
-
-        case_res = await db.execute(select(Case))
-        first_case = case_res.scalars().first()
-        if not first_case and admin_user:
-            demo_case = Case(
-                id=uuid.uuid4(),
-                case_number="CASE-2026-001",
-                jurisdiction="Cyber & Financial Crimes Unit",
-                status="ACTIVE",
-                owning_officer_id=admin_user.id
-            )
-            db.add(demo_case)
-            await db.commit()
-            print("Initialized default Case: CASE-2026-001")
 
     yield
 

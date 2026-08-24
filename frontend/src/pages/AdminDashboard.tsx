@@ -331,7 +331,7 @@ export default function AdminDashboard() {
                     <TableRow key={u.id} hover>
                       <TableCell>
                         <Typography variant="body2" sx={{ fontWeight: 600, fontFamily: 'monospace' }}>
-                          {u.public_id || '—'}
+                          {u.id || '—'}
                         </Typography>
                       </TableCell>
                       <TableCell>

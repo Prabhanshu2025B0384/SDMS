@@ -1,289 +1,498 @@
-# Secure Document Management System (Zero Cost)
+# Secure Document Management System
 
 ## 1. Project Overview
-The Secure Document Management System (DMS) is a self-hosted, 100% free, and highly secure platform designed to handle the ingestion, processing, and long-term auditing of sensitive files, primarily tailored for law enforcement or internal investigations.
+
+The Secure Document Management System (SDMS) is an advanced, highly secure web application designed to manage, process, and track sensitive investigation documents. It is intended for law enforcement agencies, intelligence units, legal firms, and government organizations that handle confidential cases and classified files. The system securely manages case files, evidence, witness statements, and reports, ensuring strict access control, cryptographic integrity, and comprehensive audit trails. Unlike normal document storage applications like Google Drive or Dropbox, SDMS enforces hierarchical role-based access control (RBAC), cryptographic audit chaining, integrity verification against tampering, and mandatory approval workflows to prevent unauthorized access or modification.
+
+---
 
 ## 2. Problem Statement
-Handling highly confidential documents requires absolute certainty of file integrity, strict role-based access control, detailed cryptographic audit trails, and efficient searchability. Traditional enterprise solutions are prohibitively expensive and often expose data to third-party SaaS clouds. This system solves these problems by providing an entirely on-premise (or local-first) deployment that incorporates AI-driven metadata extraction and strict hierarchy-based authorization at zero recurring cost.
+
+Managing sensitive and confidential investigation documents presents unique challenges that standard file-management systems cannot solve. Traditional systems struggle with:
+*   **Unauthorized access:** Sensitive files are often stored with broad permissions.
+*   **Clearance levels:** Standard systems lack hierarchical classification (e.g., Secret vs. Top Secret).
+*   **Case-based access:** Documents belong to specific cases and should only be accessed by assigned officers.
+*   **Document tampering:** No guarantee that a downloaded PDF hasn't been maliciously altered.
+*   **Lack of accountability:** Poor tracking of exactly who viewed or downloaded a file.
+*   **Difficult document search:** Scanned PDFs are often unsearchable images.
+*   **Controlled document approval:** Standard systems allow unilateral modification without oversight.
+
+A normal file-management system is insufficient because it treats files as mere blobs of data. SDMS treats files as critical legal assets, applying strict access rules, extracting structured metadata using AI and OCR, maintaining immutable audit logs, and cryptographically verifying document integrity.
+
+---
 
 ## 3. Key Features
-- **Hierarchical RBAC**: Clearance-level-based document access.
-- **Cryptographic Audit Log**: Deterministic SHA-256 hash chains for all mutations.
-- **AI-Assisted Processing**: Local Ollama-based structured data extraction.
-- **PostgreSQL FTS**: Native Full-Text Search inside PostgreSQL utilizing `TSVECTOR`.
-- **Integrity Verification**: Verifies document bytes against the expected `file_hash`.
-- **Closed Case Enforcement**: Prevents modifications and uploads on cases marked as `CLOSED`.
+
+1.  **Authentication:** Secure JWT-based authentication to verify user identity.
+2.  **Basic Hierarchical RBAC:** Roles (Admin, Senior Officer, Investigating Officer, Prosecutor) combined with clearance levels (1 to 5) restrict unauthorized actions.
+3.  **Case Management:** Organize documents into independent cases with distinct statuses (CREATED, INVESTIGATION, CLOSED) and ownership.
+4.  **Case-Level Access Assignment:** Assign multiple specific users to a case to collaborate securely.
+5.  **PDF Upload:** Secure upload, validation, and storage of PDF documents tied to specific cases.
+6.  **SHA-256 Hashing:** Cryptographic hashing of document bytes at upload for tampering detection.
+7.  **AI-Assisted PDF Extraction:** Automated pipeline using pypdf/pytesseract for OCR and local Ollama (Llama 3) for structured metadata extraction.
+8.  **PostgreSQL Full-Text Search:** High-performance search using `TSVECTOR` and `websearch_to_tsquery` across document titles, text, and metadata.
+9.  **Search Authorization Filtering:** Search results are strictly filtered at the database query level so users only see authorized matches.
+10. **Document Versioning:** Maintain historical versions of a document with independent hashes and storage paths.
+11. **Document Approval Workflow:** State machine enforcing review cycles (SUBMITTED -> UNDER_REVIEW -> APPROVED -> LOCKED).
+12. **Audit Timeline:** Cryptographically chained, tamper-evident logging of every critical user action.
+13. **Integrity Verification:** On-demand recalculation of SHA-256 hashes against stored files to detect tampering.
+14. **Failure + Retry Handling:** Robust processing lifecycle that handles OCR/AI failures, auto-retries, and flags files for manual review.
+
+---
 
 ## 4. Feature Implementation & Lifecycle
 
-### 1. Authentication
-**What it does:** Verifies user identity using email/password and issues stateless JWTs.
-**Implementation:** Implemented in `backend/app/api/auth.py`. Uses `passlib` (bcrypt) for password hashing and `PyJWT` for token generation.
-**Lifecycle:** User provides credentials -> `/auth/login` validates against `users` table -> Issues JWT -> Frontend stores token and passes via `Authorization: Bearer <token>` header.
+### 4.1 Authentication
+The system uses JWT (JSON Web Tokens) for authentication. The frontend submits user credentials to `/auth/login`. The backend uses `passlib` (bcrypt) to verify the password hash. Upon success, an access token is generated with a 24-hour expiration. Authenticated requests include this token in the `Authorization` header, and the backend decodes it to identify the user for subsequent requests via the `get_current_user` dependency.
 
-### 2. Basic Hierarchical RBAC
-**What it does:** Assigns roles (`Admin`, `Senior Officer`, `Investigating Officer`) and clearance levels (1 to 5).
-**Implementation:** Defined in `backend/app/core/authorization.py`. `check_document_access` strictly enforces `user.clearance_level >= document.classification_level`. 
+### 4.2 Basic Hierarchical RBAC
+Roles are enforced using a dual-layer approach: Roles and Clearance Levels.
+*   **Roles:** Admin, Senior Officer, Prosecutor, Investigating Officer.
+*   **Clearance Levels:** 1 (Restricted) to 5 (Executive).
+The `RoleChecker` dependency explicitly checks if a user's role grants specific permissions (e.g., `UPLOAD`, `APPROVE`). Furthermore, `check_document_access` ensures that the user's numeric clearance level is greater than or equal to the document's classification level.
 
-### 3. Case Management
-**What it does:** Groups documents logically by a Case ID (e.g., FIRs, statements).
-**Implementation:** `cases` table in PostgreSQL. Admins can globally assign/reassign cases in `AdminDashboard.tsx`.
-**Lifecycle:** `POST /cases/` -> Case created -> Visible in dropdown -> Documents uploaded to Case.
+### 4.3 Case Management
+Cases act as logical containers for documents. A case is created with a unique `case_number`, `jurisdiction`, and an `owning_officer_id`. Cases follow a lifecycle (CREATED -> INVESTIGATION -> UNDER_REVIEW -> APPROVED -> CLOSED). Documents belong exclusively to a case, meaning access to the case heavily dictates access to its contents.
 
-### 4. Case-Level Access Assignment
-**What it does:** Users can only upload or edit documents inside cases they own or are assigned to.
-**Implementation:** `case_assignments` table maps multiple users to a single case. Admin assigns via `PATCH /cases/{id}/reassign` or `POST /cases/{id}/assignments`. 
+### 4.4 Case-Level Access Assignment
+Beyond the `owning_officer_id`, admins can assign additional users to a case using the `CaseAssignment` table. Authorization checks explicitly query this table. If a user is not the owner and has no explicit assignment, they are barred from uploading or editing documents within that case, ensuring strict containment of sensitive investigations.
 
-### 5. PDF Upload
-**What it does:** Stores physical PDF documents securely.
-**Implementation:** Implemented in `backend/app/api/documents.py`. Saves PDF locally in `./storage` and kicks off `process_document_background` `BackgroundTasks`.
+### 4.5 PDF Upload
+Users upload PDFs to a specific case. The backend validates the `.pdf` extension. The file bytes are read into memory, hashed via SHA-256, and stored in the local storage directory (`./storage/<case_id>/<doc_id>/<version>.pdf`). A `Document` and `DocumentVersion` record are created in the database, setting the status to `PROCESSING`. A background task is then dispatched to perform text extraction.
 
-### 6. SHA-256 Hashing
-**What it does:** Hashes the exact bytes of the PDF upon upload to maintain a forensic fingerprint.
-**Implementation:** Handled via Python's `hashlib.sha256()`. Stored in `DocumentVersion.file_hash`.
+### 4.6 SHA-256 Hashing
+At the exact moment a file is uploaded (or a new version created), the raw bytes are hashed using the SHA-256 algorithm. This hash is permanently stored in the `DocumentVersion.file_hash` column. This creates a cryptographic baseline for the file, ensuring that any subsequent bit-level modification to the stored file will alter its hash and indicate tampering.
 
-### 7. AI-Assisted PDF Extraction
-**What it does:** Extracts text (OCR) and maps it to structured JSON (FIR Number, incident date, suspects, etc.).
-**Implementation:** `extract_text_from_pdf` (uses `pypdf`, falls back to `pytesseract`) -> `extract_structured_data_with_ollama` (calls local `Ollama`).
+### 4.7 AI-Assisted PDF Extraction
+The background processing task runs a multi-step extraction pipeline:
+1.  **Text Extraction:** Attempts pure-Python text extraction using `pypdf`.
+2.  **OCR Fallback:** If `pypdf` yields no text (e.g., scanned images), it falls back to `pdf2image` and `pytesseract` to perform Optical Character Recognition.
+3.  **AI Metadata:** The raw text is sent to a local Ollama instance running `llama3`. The AI is prompted to return a structured JSON object extracting fields like FIR number, incident date, police station, and IPC sections. If Ollama fails or is unavailable, it falls back to a rule-based regex heuristic extractor.
 
-### 8. PostgreSQL Full-Text Search
-**What it does:** Allows keyword searching across document text and titles.
-**Implementation:** `Document.search_vector` uses native `TSVECTOR`. Queries use `websearch_to_tsquery` and `ts_rank` via Alembic migrations.
+### 4.8 PostgreSQL Full-Text Search
+The database utilizes PostgreSQL's native full-text search capabilities. When a document is processed, its title, type, and AI-extracted metadata are combined into a `TSVECTOR` column (`search_vector`). The `/search/documents` endpoint converts user queries using `websearch_to_tsquery` and ranks results via `ts_rank`. A `ts_headline` snippet is also generated from the raw OCR text to show context.
 
-### 9. Search Authorization Filtering
-**What it does:** Search only returns documents the user has clearance and permission to see.
-**Implementation:** `get_authorized_document_filter(user)` returns a complex SQLAlchemy `or_` filter condition that is appended to the search query.
+### 4.9 Search Authorization Filtering
+Search filtering happens securely at the database query level. The `get_authorized_document_filter` function returns a complex SQLAlchemy `or_` condition. It joins the `Case`, `DocumentPermission`, and `CaseAssignment` tables. The database only returns search hits for documents where the user meets the clearance level AND (owns the case, is assigned to the case, has explicit document permission, or the document is unrestricted Level 1).
 
-### 10. Document Versioning
-**What it does:** Modifications to a document (new PDF) create a new sequential version (e.g., v1.0 -> v2.0) while preserving the old file and its hash.
-**Implementation:** `DocumentVersion` table maps to `Document`. A new upload via `POST /documents/{id}/versions` inserts a new row and updates `Document.current_version_id`.
+### 4.10 Document Versioning
+Documents are version-controlled via the `DocumentVersion` table. Each edit (e.g., uploading a revised report) generates a new `DocumentVersion` with an incremented version number (e.g., 1.0 -> 2.0). The physical file is stored in a separate path (`<version>.pdf`), and a new SHA-256 hash is computed. The main `Document` record updates its `current_version_id`. An endpoint allows authorized users to restore previous versions.
 
-### 11. Document Approval Workflow
-**What it does:** Status transitions (`SUBMITTED` -> `UNDER_REVIEW` -> `APPROVED` -> `LOCKED`).
-**Implementation:** Handled in `update_document_status`. Investigating Officers cannot approve their own documents; Requires `Senior Officer` or `Admin`.
+### 4.11 Document Approval Workflow
+Documents follow a strict state machine: `READY` -> `SUBMITTED` -> `UNDER_REVIEW` -> `APPROVED` -> `LOCKED`.
+*   Only users with the `SUBMIT` permission can move a document to `SUBMITTED`.
+*   Only users with the `APPROVE` permission can approve or reject.
+*   Crucially, if a user is the investigating officer of the case, they are blocked from approving their own documents (enforcing separation of duties) unless they are an Admin.
 
-### 12. Audit Timeline
-**What it does:** Cryptographically chained logs of every action performed.
-**Implementation:** `backend/app/core/audit.py` canonicalizes the JSON payload and chains `previous_hash` with `current_hash`.
+### 4.12 Audit Timeline
+Every critical action (view, download, upload, status change, permission change) triggers the `log_audit_event` function. Audit logs are written to the `AuditLog` table. To ensure integrity, the logging uses cryptographic chaining: it locks the table (`FOR UPDATE`), retrieves the previous log's `current_hash`, and includes it in the canonical JSON payload of the new event. The new payload is hashed, creating a tamper-evident sequential blockchain of audit events.
 
-### 13. Integrity Verification
-**What it does:** Checks if the stored file matches its historic hash.
-**Implementation:** `POST /documents/{id}/verify-integrity` re-hashes local bytes and compares it to `file_hash`. Returns `VERIFIED` or `TAMPERED`.
+### 4.13 Integrity Verification
+The integrity verification endpoint reads the physical file from the `./storage` directory, recalculates the SHA-256 hash of the raw bytes, and compares it against the `file_hash` stored in the `DocumentVersion` table. If the hashes match, the status is `VERIFIED`. If they differ, it is flagged as `TAMPERED`, updating the `is_tampered` boolean on the version record and logging a critical audit failure.
 
-### 14. Failure + Retry Handling
-**What it does:** If AI or OCR fails during background processing, it logs failure and allows manual retry.
-**Implementation:** `doc.status = PROCESSING_FAILED`. User triggers `POST /documents/{id}/retry`. Caps at 3 retries, then shifts to `MANUAL_REVIEW_REQUIRED`.
+### 4.14 Failure + Retry Handling
+If the background extraction pipeline fails (e.g., corrupt PDF, Ollama timeout), the document status is set to `PROCESSING_FAILED` and the error is saved to `failure_reason`. Authorized users can hit the `/retry` endpoint. The `retry_count` is incremented. If the retry count reaches 3, the document is permanently marked as `MANUAL_REVIEW_REQUIRED`, forcing administrative intervention.
+
+---
 
 ## 5. End-to-End Document Lifecycle
-1. **Upload:** User hits `POST /upload`. File is stored in `./storage`, hashed, and initial `Document` and `DocumentVersion` DB records are created as `PROCESSING`.
-2. **Background AI:** FastAPI `BackgroundTasks` calls Ollama. Extracts OCR and structured data.
-3. **Indexing:** Updates `TSVECTOR` search vector. Status changes to `READY`.
-4. **Approval:** IO submits document (`SUBMITTED`). Senior officer approves (`APPROVED`).
-5. **Closing:** The Case is set to `CLOSED`. Subsequent `UPLOAD` or `EDIT` attempts on any document in the case are explicitly blocked by the backend (HTTP 400).
+
+```mermaid
+stateDiagram-v2
+    [*] --> UPLOADED: User Uploads PDF
+    UPLOADED --> HASHED: SHA-256 Calculation
+    HASHED --> STORED: Save to Disk & DB
+    STORED --> PROCESSING: Background Task Initiated
+    
+    state ProcessingPhase {
+        PROCESSING --> pypdf: Extract Text
+        pypdf --> pytesseract: OCR Fallback (if needed)
+        pytesseract --> Ollama: AI Metadata Extraction
+        Ollama --> TSVECTOR: Search Indexing
+    }
+    
+    ProcessingPhase --> READY: Success
+    ProcessingPhase --> PROCESSING_FAILED: Error Occurs
+    
+    PROCESSING_FAILED --> ProcessingPhase: Retry (count < 3)
+    PROCESSING_FAILED --> MANUAL_REVIEW_REQUIRED: Max Retries Reached
+    
+    READY --> SUBMITTED: Officer Submits
+    SUBMITTED --> UNDER_REVIEW: Supervisor Picks Up
+    UNDER_REVIEW --> APPROVED: Approved
+    UNDER_REVIEW --> REJECTED: Denied
+    REJECTED --> READY: Fix & Resubmit
+    APPROVED --> LOCKED: Finalized
+```
+
+---
 
 ## 6. Case Lifecycle
-- `CREATED` -> `INVESTIGATION`
-- `INVESTIGATION` -> `UNDER_REVIEW`
-- `UNDER_REVIEW` -> `APPROVED` or `REJECTED`
-- `APPROVED` -> `CLOSED`
-Modifications are permanently locked for `CLOSED` cases via `check_document_access(..., required_action="EDIT")`.
+
+Cases manage the workflow of the overarching investigation. A closed case prevents further document edits or uploads.
+
+```mermaid
+stateDiagram-v2
+    [*] --> CREATED: Admin/Officer creates case
+    CREATED --> INVESTIGATION: Active investigation starts
+    INVESTIGATION --> UNDER_REVIEW: Case files submitted for review
+    UNDER_REVIEW --> REJECTED: Corrections needed
+    REJECTED --> INVESTIGATION: Resumed
+    UNDER_REVIEW --> APPROVED: Review passed
+    APPROVED --> CLOSED: Terminal State
+    CLOSED --> [*]
+```
+
+---
 
 ## 7. System Architecture
-The system employs a monolithic backend (FastAPI) acting as a REST API for the Single-Page Application (React). The backend leverages PostgreSQL for both relational mapping (SQLAlchemy) and Full-Text Search. Asynchronous `BackgroundTasks` manage heavy OCR processing (Tesseract/Poppler) and local AI inferences (Ollama). 
+
+The architecture consists of a decoupled frontend and backend.
+*   **Frontend:** A React/Vite Single Page Application (SPA) utilizing Material UI for styling and axios for API communication.
+*   **Backend:** A FastAPI asynchronous Python application. It handles routing, authorization, and background tasks.
+*   **Database:** PostgreSQL (with SQLite fallback) accessed via SQLAlchemy ORM asynchronously. It stores relational data, TSVECTOR indexes, and JSON metadata.
+*   **Storage:** Local filesystem storage (`./storage`), structured hierarchically by Case ID and Document ID.
+*   **Background Processing:** FastAPI `BackgroundTasks` handle heavy OCR and AI extraction asynchronously without blocking the HTTP response.
+*   **AI/OCR:** `pytesseract` handles OCR, and a local Ollama instance processes the text for metadata.
+
+---
 
 ## 8. Architecture Diagram
+
 ```mermaid
-graph TD;
-    Client[React Frontend] -->|HTTPS/JWT| FastAPI[FastAPI Backend];
-    FastAPI <-->|asyncpg| PostgreSQL[(PostgreSQL DB)];
-    FastAPI -->|os.write| LocalStorage[Local File System];
-    FastAPI -->|Background Task| OCR[Tesseract / pypdf];
-    OCR -->|Text| AI[Local Ollama Inference];
-    AI -->|JSON| FastAPI;
-    FastAPI -->|TSVECTOR| PostgreSQL;
+graph TD
+    User([User / Browser]) -->|HTTPS / JWT| Frontend[React + Vite + MUI]
+    Frontend -->|REST API| Backend[FastAPI]
+    
+    subgraph Backend Services
+        Backend -->|Auth & RBAC| Auth[Security Module]
+        Backend -->|Transactions| DB[(PostgreSQL / SQLite)]
+        Backend -->|File I/O| Disk[(Local Storage)]
+        
+        Backend -.->|Background Task| Pipeline[Extraction Pipeline]
+        Pipeline -->|pypdf / OCR| PDF[PyTesseract]
+        Pipeline -->|Metadata| AI[Local Ollama: Llama3]
+        Pipeline -->|Update| DB
+    end
+    
+    DB -->|TSVECTOR| Search[Full-Text Search]
+    Auth -->|Cryptographic Chaining| Audit[Audit Logs]
 ```
+
+---
 
 ## 9. Technology Stack
-| Layer | Technology | Purpose |
-| ----- | ---------- | ------- |
-| Frontend | React + Vite | SPA Framework |
-| UI/UX | Material UI v9 | Component library |
-| Backend | Python 3 + FastAPI | High-performance async REST API |
-| Database | PostgreSQL | Relational storage & FTS (`asyncpg`) |
-| ORM | SQLAlchemy 2.0 | Async database operations |
-| Migrations | Alembic | Schema version control |
-| Auth | PyJWT + bcrypt | Secure stateless sessions |
-| Storage | OS local / Boto3 | Storage abstraction |
-| AI Extraction | Ollama (requests) | JSON metadata parsing |
-| OCR | pytesseract, pdf2image | Non-selectable PDF parsing |
+
+*   **Frontend Framework:** React 19
+*   **Build Tool:** Vite
+*   **Programming Languages:** TypeScript (Frontend), Python 3 (Backend)
+*   **UI Framework:** Material UI (`@mui/material`)
+*   **Backend Framework:** FastAPI
+*   **Database:** PostgreSQL (production target) / SQLite (development default)
+*   **Database Driver:** `asyncpg` (PostgreSQL), `aiosqlite` (SQLite)
+*   **ORM:** SQLAlchemy 2.0 (Async)
+*   **Migration System:** Alembic
+*   **Authentication Libraries:** `PyJWT`, `passlib`, `bcrypt`
+*   **Storage Provider:** Local File System (extensible to S3)
+*   **OCR Libraries:** `pypdf`, `pytesseract`, `pdf2image`
+*   **AI Runtime:** Ollama (Local LLM API)
+*   **Search Technology:** PostgreSQL TSVECTOR & TSQUERY
+*   **Testing Tools:** `pytest`, `httpx` (AsyncClient)
+
+---
 
 ## 10. Project Structure
-```text
+
+```
 DMS/
 ├── backend/
-│   ├── alembic/       # DB Migrations
-│   ├── app/
-│   │   ├── api/       # Router Endpoints
-│   │   ├── core/      # Security, Config, Audit, Auth logic
-│   │   ├── services/  # AI Extraction and OCR logic
-│   │   ├── main.py    # FastAPI Entrypoint
-│   │   └── models.py  # SQLAlchemy schemas
-│   └── storage/       # Local Document Storage
+│   ├── alembic/                # Database migrations
+│   ├── app/                    # Main application code
+│   │   ├── api/                # API Route handlers (auth, cases, documents, search, admin)
+│   │   ├── core/               # Core configuration, security, audit, authorization
+│   │   ├── services/           # Business logic (e.g., OCR & AI extraction)
+│   │   ├── database.py         # DB connection and session setup
+│   │   ├── main.py             # FastAPI entrypoint and lifespan events
+│   │   └── models.py           # SQLAlchemy declarative models
+│   ├── tests/                  # Pytest test suites
+│   ├── storage/                # Local document storage directory
+│   ├── alembic.ini             # Alembic configuration
+│   ├── requirement.txt         # Python dependencies
+│   ├── full_test.py            # Comprehensive API test script
+│   └── .env                    # Environment variables
 └── frontend/
     ├── src/
-    │   ├── context/   # React Auth Context
-    │   └── pages/     # React Views (AdminDashboard, Documents, Search)
+    │   ├── assets/             # Static assets
+    │   ├── components/         # Reusable React components
+    │   ├── context/            # React context (Auth)
+    │   ├── pages/              # Page views
+    │   ├── App.tsx             # Main React component
+    │   ├── main.tsx            # React entrypoint
+    │   └── theme.ts            # Material UI theme definitions
+    ├── package.json            # NPM dependencies
+    ├── vite.config.ts          # Vite bundler configuration
+    └── tsconfig.json           # TypeScript configuration
 ```
+
+---
 
 ## 11. Prerequisites
-- Python 3.9+
-- Node.js 18+ and `npm`
-- PostgreSQL 15+ (Running locally or via Docker)
-- Tesseract-OCR (must be installed on OS `apt install tesseract-ocr` or Windows installer)
-- Poppler (must be installed on OS for `pdf2image`)
-- Local Ollama Engine (optional for AI, fallback exists)
+
+To run this system locally, the following software must be installed:
+*   **Python:** 3.10+
+*   **Node.js:** 18+ and `npm`
+*   **PostgreSQL:** (Optional, SQLite is used by default if no URL is provided)
+*   **Tesseract OCR:** Required for scanned PDF text extraction.
+*   **Poppler:** Required by `pdf2image` to convert PDFs to images.
+*   **Ollama:** Required for AI-assisted metadata extraction (with `llama3` model pulled).
+
+---
 
 ## 12. Configuration
-All backend configuration is loaded via `pydantic_settings`. 
-Frontend configuration uses standard Vite environment variables (or relies on hardcoded `window.location.hostname` local IPs for development).
 
-## 13. Environment Variables (`backend/.env`)
-```env
-DATABASE_URL="postgresql+asyncpg://postgres:root@localhost:5432/secure_dms"
-# Optional Overrides
-# STORAGE_TYPE="s3"
-# OLLAMA_BASE_URL="http://localhost:11434"
-```
+The application is configured primarily through environment variables and sensible defaults:
+*   **Backend Configuration:** Handled by `pydantic-settings` in `app.core.config`. It manages database URLs, JWT secrets, and Ollama endpoint URLs.
+*   **Database Configuration:** Connects to an asynchronous SQLite database (`dms.db`) by default.
+*   **Storage Configuration:** Defaults to local storage (`./storage`).
+*   **AI Configuration:** Assumes Ollama is running on `http://localhost:11434` with the `llama3` model.
+*   **CORS Configuration:** `main.py` is configured to allow all origins (`*`) to support local Vite development.
 
-## 14. Database Setup
-Ensure PostgreSQL is running. Create an empty database matching the URL string:
-```sql
-CREATE DATABASE secure_dms;
-```
+---
 
-## 15. Storage Setup
-The application automatically creates `./storage` in the `backend/` directory upon startup via `lifespan` hook.
+## 13. Environment Variables
 
-## 16. OCR Setup
-Ensure `tesseract` and `poppler-utils` are available in your system `PATH`.
+Create a `.env` file in the `backend/` directory. The application uses these variables:
 
-## 17. AI Setup
-Start Ollama in the background on port `11434` with the Llama 3 model installed:
-```bash
-ollama run llama3
-```
+| Name | Purpose | Required | Example |
+| :--- | :--- | :--- | :--- |
+| `DATABASE_URL` | Async database connection string. | No | `sqlite+aiosqlite:///./dms.db` |
+| `STORAGE_TYPE` | Storage backend (`local` or `s3`). | No | `local` |
+| `STORAGE_LOCAL_DIR` | Path to local storage directory. | No | `./storage` |
+| `INITIAL_ADMIN_EMAIL` | Email for the default seeded admin. | No | `admin@gmail.com` |
+| `INITIAL_ADMIN_PASSWORD` | Password for the default seeded admin. | No | `<PLACEHOLDER_PASSWORD>` |
+| `SECRET_KEY` | Key for signing JWT tokens. | No | `<PLACEHOLDER_JWT_SECRET>` |
+| `OLLAMA_BASE_URL` | URL of the local Ollama instance. | No | `http://localhost:11434` |
+| `SUPABASE_URL` | Supabase endpoint if using remote storage. | No | `<PLACEHOLDER_URL>` |
+| `SUPABASE_SERVICE_KEY` | Supabase secret key. | No | `<PLACEHOLDER_KEY>` |
 
-## 18. Installation
-Clone the repository.
-```bash
-git clone <repository_url>
-cd DMS
-```
+---
 
-## 19. Backend Startup
-```bash
-cd backend
-python -m venv venv
-# Windows
-.\venv\Scripts\activate
-# Linux
-source venv/bin/activate
+## 14. Installation
 
-pip install -r requirement.txt
-alembic upgrade head
-python -m uvicorn app.main:app --reload --port 8000
-```
-Swagger UI is available at `http://localhost:8000/docs`.
+These instructions are strictly for local development setup.
 
-## 20. Frontend Startup
-```bash
-cd frontend
-npm install
-npm run dev
-```
-Accessible at `http://localhost:5173`.
+1.  **Clone the repository:**
+    ```bash
+    git clone <repository_url>
+    cd DMS
+    ```
+2.  **Backend Setup:**
+    ```bash
+    cd backend
+    python -m venv venv
+    # Windows
+    venv\Scripts\activate
+    # Linux/Mac
+    source venv/bin/activate
+    
+    pip install -r requirement.txt
+    ```
+3.  **Prepare the Database & Storage:**
+    The application utilizes SQLAlchemy's `create_all` during startup to build the schema automatically. The `./storage` directory is also auto-created.
+4.  **Install OCR Dependencies (OS Specific):**
+    *   *Windows:* Install Tesseract OCR and Poppler binaries, and add them to your system PATH.
+    *   *Linux:* `sudo apt install tesseract-ocr poppler-utils`
+    *   *Mac:* `brew install tesseract poppler`
+5.  **Install AI Dependencies:**
+    Install Ollama from `ollama.com` and run:
+    ```bash
+    ollama run llama3
+    ```
+6.  **Frontend Setup:**
+    ```bash
+    cd ../frontend
+    npm install
+    ```
 
-## 21. Default Administrator Credentials
-The application automatically seeds a default Admin upon first startup inside `app/main.py`:
-- **Username:** `admin12032008@gmail.com`
-- **Password:** `adminhumai`
-- **Role:** Admin (Clearance Level 5)
+---
 
-## 22. API Endpoint Overview
-| Method | Endpoint | Authentication | Authorization | Purpose |
-| ------ | -------- | -------------- | ------------- | ------- |
-| POST | `/auth/login` | None | None | JWT Issue |
-| GET | `/auth/me` | JWT | Any | Get user profile |
-| POST | `/auth/change-password` | JWT | Any | Update password |
-| POST | `/auth/signup` | None | None | Register new user |
-| GET | `/cases/` | JWT | Any | List cases |
-| POST | `/cases/` | JWT | Any | Create case |
-| PATCH | `/cases/{id}/reassign` | JWT | Admin | Transfer case ownership |
-| POST | `/cases/{id}/assignments`| JWT | Admin | Add officer to case |
-| PATCH | `/cases/{id}/status` | JWT | Owner/Admin | Change Case Status |
-| GET | `/documents/` | JWT | Filtered | List accessible documents |
-| POST | `/documents/upload` | JWT | Assigned/Admin| Upload new document |
-| GET | `/documents/{id}` | JWT | Filtered | Document details |
-| GET | `/documents/{id}/download` | JWT | Filtered | Get PDF file |
-| POST | `/documents/{id}/versions`| JWT | Edit Perms | Upload new version |
-| POST | `/documents/{id}/status` | JWT | Review Perms| Change Doc Status |
-| GET | `/search/` | JWT | Filtered | FTS Postgres Search |
-| GET | `/admin/users` | JWT | Admin | List all users |
-| GET | `/admin/audit-logs` | JWT | Admin | View chained audit logs |
+## 15. Backend Startup
 
-## 23. Authentication & Authorization
-Uses robust stateless JWTs issued on login, transmitting user IDs to middleware.
+To start the FastAPI backend locally:
 
-## 24. RBAC
-Roles determine capability boundaries (`Investigating Officer`, `Senior Officer`, `Admin`). Clearance levels determine exact hierarchical visibility bounds per document.
+1.  Open a terminal in the `backend/` directory.
+2.  Activate the virtual environment.
+3.  Run the Uvicorn server:
+    ```bash
+    python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
+    ```
+4.  The API will be available at `http://127.0.0.1:8000`.
+5.  Interactive Swagger API documentation is accessible at `http://127.0.0.1:8000/docs`.
 
-## 25. Case-Level Access Control
-Isolated boundaries per case unless globally administered.
+---
 
-## 26. Search Authorization
-PostgreSQL level filtering logic ensures that if a document doesn't match case assignments or explicit shares, it physically cannot be searched by the user.
+## 16. Frontend Startup
 
-## 27. Document Versioning
-Append-only modifications prevent overwriting. 
+To start the React frontend locally:
 
-## 28. Approval Workflow
-Sequential state machine (SUBMITTED -> UNDER REVIEW -> APPROVED -> LOCKED).
+1.  Open a terminal in the `frontend/` directory.
+2.  Run the Vite development server:
+    ```bash
+    npm run dev
+    ```
+3.  The frontend will typically be accessible at `http://localhost:5173`.
+4.  The frontend is configured (often via Axios instances) to communicate with the backend at port 8000.
 
-## 29. Audit Timeline
-Cryptographically validated. Changing historic entries breaks the hash chaining.
+---
 
-## 30. Integrity Verification
-A manual endpoint `/verify-integrity` actively reads physical blocks and compares `sha256` results to expected database hashes.
+## 17. Default Administrator Credentials
 
-## 31. Failure & Retry Handling
-Intelligent state monitoring tags failed background OCR pipelines and limits retry attempts to avoid DoS.
+During the initial backend startup, the system's `lifespan` event automatically seeds a default administrator account into the database if one does not exist.
 
-## 32. Testing Methodology
-- **Routing Testing:** Forced unauthenticated requests against the API to ensure `401 Unauthorized` cascades properly.
-- **API Testing:** Executed automated integration scripts querying protected resources to verify business logic.
-- **Security & Penetration Testing:** Assessed horizontal privilege escalation (BOLA/IDOR) by attempting to upload documents into cases owned by different users.
+*   **Email:** `admin@gmail.com`
+*   **Role:** `Admin`
+*   **Clearance Level:** `5` (Executive)
+*   **Password:** `admin` (Intended for local development only)
 
-## 33. Routing Testing Results
-- `/auth/login` and `/auth/signup` are successfully publicly available.
-- All backend routes effectively return `401` when requests omit Bearer tokens.
+> [!WARNING]
+> These credentials are hardcoded defaults for local development convenience. You **MUST** change the password and JWT secret immediately in any production or exposed environment.
 
-## 34. API Testing Results
-- Attempting to bypass Case assignments triggers a strict `HTTP 403`.
-- Invalid routes gracefully return standard `HTTP 404`.
-- AI Processing cleanly intercepts network errors and sets document statuses to `PROCESSING_FAILED` instead of crashing.
+---
 
-## 35. Penetration Testing Results
-- **Authentication Bypass:** FAILED. JWTs are strictly validated via pyJWT algorithm.
-- **IDOR / Cross-Case Uploads:** FAILED. Uploads verify `case.owning_officer_id` and explicit DB `case_assignments` before permitting storage writes.
-- **Role Escalation:** FAILED. Junior users receive `HTTP 403` when attempting to access `/admin/users`.
+## 18. API Endpoint Overview
 
-## 36. Security Findings
-*No Critical or High severity vulnerabilities were identified during standard local penetration testing. The API is inherently heavily gated.*
+### Authentication
+*   `POST /auth/login` (Public): Authenticate and receive a JWT.
+*   `GET /auth/me` (Auth): Get current user details.
 
-## 37. Known Limitations
-- The system heavily relies on `asyncpg` concurrency. Large scale un-batched bulk uploads may bottleneck the local Ollama LLM if `BackgroundTasks` spin up too many parallel requests to port 11434.
+### Cases
+*   `GET /cases/` (Auth): List cases visible to the user.
+*   `POST /cases/` (Auth, Admin/Officer): Create a new case.
+*   `PATCH /cases/{case_id}/reassign` (Auth, Admin): Change case ownership.
+*   `POST /cases/{case_id}/assignments` (Auth, Admin): Assign users to a case.
+*   `PATCH /cases/{case_id}/status` (Auth, Owner/Admin): Update case status.
 
-## 38. Troubleshooting
-- **Missing FTS Error:** Ensure you ran `alembic upgrade head` so the DB schema adds `TSVECTOR` correctly.
-- **Cannot Upload Documents:** Verify your User Role is cleared for uploads AND that the Case is not in the `CLOSED` state.
-- **OCR Not Working:** Install `tesseract-ocr` externally on the server host machine.
+### Documents
+*   `GET /documents/` (Auth): List authorized documents.
+*   `POST /documents/upload` (Auth, Upload Perm): Upload a new PDF.
+*   `GET /documents/{document_id}` (Auth, View Perm): Retrieve metadata.
+*   `GET /documents/{document_id}/download` (Auth, Download Perm): Download the physical PDF.
+*   `POST /documents/{document_id}/status` (Auth, Edit Perm): Execute workflow transitions (e.g., SUBMITTED).
+*   `GET /documents/{document_id}/permissions` (Auth): View explicit permissions.
+*   `POST /documents/{document_id}/permissions` (Auth, Owner/Admin): Share document.
+
+### Versions & Integrity
+*   `GET /documents/{document_id}/versions` (Auth, View Perm): List historical versions.
+*   `POST /documents/{document_id}/versions` (Auth, Edit Perm): Upload a new version.
+*   `POST /documents/{document_id}/versions/{version_id}/restore` (Auth, Edit Perm): Restore a past version.
+*   `POST /documents/{document_id}/verify-integrity` (Auth): Verify SHA-256 hash against disk.
+*   `POST /documents/{document_id}/retry` (Auth): Retry a failed processing pipeline.
+
+### Search
+*   `GET /search/documents` (Auth): Secure full-text search.
+
+---
+
+## 19. Authentication & Authorization
+
+Authentication is handled via JWT bearer tokens injected into requests.
+Authorization is highly complex and handled by `app.core.authorization`:
+1.  **Clearance Level Check:** A user's clearance level (1-5) must be `>=` the document's classification level. If not, access is strictly denied and a security audit event is logged.
+2.  **Case Access:** A user gains access to a document if they own the parent Case (`owning_officer_id`) or have an explicit assignment in the `CaseAssignment` table.
+3.  **Document Permissions (Sharing):** Admins and case owners can grant explicit `VIEW`, `DOWNLOAD`, or `EDIT` permissions to specific users on a per-document basis.
+4.  **Admin Override:** Admins automatically bypass standard access checks.
+5.  **State Restrictions:** Documents in a `CLOSED` case cannot be edited or uploaded. Users cannot approve their own documents unless they are an Admin.
+
+---
+
+## 20. Search Authorization
+
+Because the search endpoint queries the entire database, authorization must be applied directly to the SQL query to prevent data leakage. The `get_authorized_document_filter()` function constructs a SQLAlchemy `or_` filter. This filter enforces that the SQL query only returns documents matching the user's explicit permissions, case assignments, case ownership, and clearance level. Consequently, unauthorized documents are filtered out at the database level before any results are paginated or returned to the frontend.
+
+---
+
+## 21. Document Versioning
+
+The architecture cleanly separates `Document` (metadata) from `DocumentVersion` (physical file data).
+*   Every upload creates a new `DocumentVersion` with a unique ID, hash, and physical file path.
+*   The parent `Document` record maintains a `current_version_id` pointer.
+*   Old versions are permanently retained in storage and the database.
+*   The restore endpoint creates a *new* version copy using the old version's physical file, preserving the linear history of the document.
+
+---
+
+## 22. Audit Timeline
+
+The `AuditLog` captures exactly *who* did *what* to *which* resource, and *when*.
+*   Events like `DOCUMENT_VIEWED`, `DOCUMENT_UPLOADED`, and `UNAUTHORIZED_ACCESS_ATTEMPT` are captured.
+*   The system uses **cryptographic chaining**. When logging an event, the database is locked to fetch the `current_hash` of the preceding record. This becomes the `previous_hash` of the new record. A new SHA-256 hash is computed over the payload. This forms a tamper-evident blockchain within the SQL database.
+
+---
+
+## 23. Integrity Verification
+
+Sensitive documents must be protected against silent corruption or malicious tampering on disk.
+The `/verify-integrity` endpoint automates this:
+1.  Retrieves the expected `file_hash` from the database.
+2.  Reads the actual physical file bytes from `./storage`.
+3.  Recalculates the SHA-256 hash.
+4.  Compares the hashes. If they differ, the document version is permanently flagged as `is_tampered=True`, and a high-severity `INTEGRITY_FAILURE` audit log is generated.
+
+---
+
+## 24. Failure and Retry Handling
+
+Extracting text via OCR and AI is resource-intensive and prone to failure (e.g., Ollama crashing, timeout, corrupt PDF).
+*   Upon failure, the document status degrades to `PROCESSING_FAILED` and the error is logged.
+*   The file remains accessible, but metadata extraction halts.
+*   Users can call the `/retry` endpoint, which increments the `retry_count` and requeues the background task.
+*   If `retry_count` hits 3, the status locks into `MANUAL_REVIEW_REQUIRED`, preventing endless retry loops and signaling to an Admin that the file requires manual data entry or technical inspection.
+
+---
+
+## 25. Testing Methodology
+
+Local API integration testing was performed comprehensively against the live running backend using `httpx` and an automated Python script (`full_test.py`). Tests utilized a seeded Admin account to perform non-destructive actions. 
+
+The test script executed real HTTP requests to validate:
+*   **Routing:** Invalid methods, public routes, and 401 unauthenticated access rejection.
+*   **Authentication:** Valid and invalid login attempts.
+*   **Case APIs:** Creating a dynamically named case and listing cases.
+*   **Document APIs:** Uploading a mock PDF byte stream, retrieving document details, downloading the file, checking version lists, progressing the state machine to `SUBMITTED`, verifying integrity, and ensuring proper validation on retry logic.
+*   **Search:** Verifying the search endpoint responds successfully with a test query.
+
+---
+
+## 26. Routing Testing Results
+
+| Test | Expected Result | Actual Result | Status |
+| :--- | :--- | :--- | :--- |
+| Public login route (Accessible) | 401 (Invalid creds) | 401 | PASS |
+| Protected route without JWT | 401 | 401 | PASS |
+| Invalid route | 404 | 404 | PASS |
+| Invalid method | 405 | 405 | PASS |
+
+---
+
+## 27. API Testing Results
+
+| Test | Endpoint | Expected | Actual | Status |
+| :--- | :--- | :--- | :--- | :--- |
+| Invalid login | `POST /auth/login` | 401 | 401 | PASS |
+| Valid login | `POST /auth/login` | 200 | 200 | PASS |
+| Case creation | `POST /cases/` | 200 | 200 | PASS |
+| Case retrieval | `GET /cases/` | 200 | 200 | PASS |
+| Document upload | `POST /documents/upload` | 200 | 200 | PASS |
+| Document retrieve | `GET /documents/{id}` | 200 | 200 | PASS |
+| Document download | `GET /documents/{id}/download`| 200 | 200 | PASS |
+| Document versions list | `GET /documents/{id}/versions`| 200 | 200 | PASS |
+| Approval workflow - SUBMITTED | `POST /documents/{id}/status`| 200 | 200 | PASS |
+| Integrity verification | `POST /documents/{id}/verify-integrity`| 200 | 200 | PASS |
+| Retry behavior (when not failed) | `POST /documents/{id}/retry` | 400 | 400 | PASS |
+| Search documents | `GET /search/documents` | 200 | 200 | PASS |
+
+**Testing Summary:**
+*   **Total tests executed:** 16
+*   **Passed:** 16
+*   **Failed:** 0
+*   **Important findings:** The API robustly handles authentication boundaries and properly prevents invalid state transitions (e.g., retrying a non-failed document returns a clean 400 Bad Request rather than a 500 error). File upload parsing works correctly even with synthetically generated PDF bytes.

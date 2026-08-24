@@ -4,7 +4,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Body
 from pydantic import BaseModel
 from typing import Optional
-from sqlalchemy import func
+from sqlalchemy import func, cast, String
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.exc import IntegrityError
@@ -31,6 +31,7 @@ async def list_all_users(search: Optional[str] = None, db: AsyncSession = Depend
     if search:
         search_term = f"%{search.strip()}%"
         query = query.where(
+            (cast(User.id, String).ilike(search_term)) |
             (User.public_id.ilike(search_term)) |
             (User.email.ilike(search_term)) |
             (User.department.ilike(search_term)) |
