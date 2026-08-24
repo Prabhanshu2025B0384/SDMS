@@ -58,7 +58,7 @@ Cases act as logical containers for documents. A case is created with a unique `
 Beyond the `owning_officer_id`, admins can assign additional users to a case using the `CaseAssignment` table. Authorization checks explicitly query this table. If a user is not the owner and has no explicit assignment, they are barred from uploading or editing documents within that case, ensuring strict containment of sensitive investigations.
 
 ### 4.5 PDF Upload
-Users upload PDFs to a specific case. The backend validates the `.pdf` extension. The file bytes are read into memory, hashed via SHA-256, and stored in the local storage directory (`./storage/<case_id>/<doc_id>/<version>.pdf`). A `Document` and `DocumentVersion` record are created in the database, setting the status to `PROCESSING`. A background task is then dispatched to perform text extraction.
+Users upload PDFs to a specific case. The backend validates the `.pdf` extension. The file bytes are read into memory, hashed via SHA-256, and uploaded to a Supabase Storage bucket path (`<case_id>/<doc_id>/<version>.pdf`). A `Document` and `DocumentVersion` record are created in the database, setting the status to `PROCESSING`. A background task is then dispatched to perform text extraction.
 
 ### 4.6 SHA-256 Hashing
 At the exact moment a file is uploaded (or a new version created), the raw bytes are hashed using the SHA-256 algorithm. This hash is permanently stored in the `DocumentVersion.file_hash` column. This creates a cryptographic baseline for the file, ensuring that any subsequent bit-level modification to the stored file will alter its hash and indicate tampering.
@@ -76,7 +76,7 @@ The database utilizes PostgreSQL's native full-text search capabilities. When a 
 Search filtering happens securely at the database query level. The `get_authorized_document_filter` function returns a complex SQLAlchemy `or_` condition. It joins the `Case`, `DocumentPermission`, and `CaseAssignment` tables. The database only returns search hits for documents where the user meets the clearance level AND (owns the case, is assigned to the case, has explicit document permission, or the document is unrestricted Level 1).
 
 ### 4.10 Document Versioning
-Documents are version-controlled via the `DocumentVersion` table. Each edit (e.g., uploading a revised report) generates a new `DocumentVersion` with an incremented version number (e.g., 1.0 -> 2.0). The physical file is stored in a separate path (`<version>.pdf`), and a new SHA-256 hash is computed. The main `Document` record updates its `current_version_id`. An endpoint allows authorized users to restore previous versions.
+Documents are version-controlled via the `DocumentVersion` table. Each edit (e.g., uploading a revised report) generates a new `DocumentVersion` with an incremented version number (e.g., 1.0 -> 2.0). The physical file is stored in a separate path in Supabase Storage (`<version>.pdf`), and a new SHA-256 hash is computed. The main `Document` record updates its `current_version_id`. An endpoint allows authorized users to restore previous versions.
 
 ### 4.11 Document Approval Workflow
 Documents follow a strict state machine: `READY` -> `SUBMITTED` -> `UNDER_REVIEW` -> `APPROVED` -> `LOCKED`.
@@ -88,7 +88,7 @@ Documents follow a strict state machine: `READY` -> `SUBMITTED` -> `UNDER_REVIEW
 Every critical action (view, download, upload, status change, permission change) triggers the `log_audit_event` function. Audit logs are written to the `AuditLog` table. To ensure integrity, the logging uses cryptographic chaining: it locks the table (`FOR UPDATE`), retrieves the previous log's `current_hash`, and includes it in the canonical JSON payload of the new event. The new payload is hashed, creating a tamper-evident sequential blockchain of audit events.
 
 ### 4.13 Integrity Verification
-The integrity verification endpoint reads the physical file from the `./storage` directory, recalculates the SHA-256 hash of the raw bytes, and compares it against the `file_hash` stored in the `DocumentVersion` table. If the hashes match, the status is `VERIFIED`. If they differ, it is flagged as `TAMPERED`, updating the `is_tampered` boolean on the version record and logging a critical audit failure.
+The integrity verification endpoint retrieves the physical file from Supabase Storage, recalculates the SHA-256 hash of the raw bytes, and compares it against the `file_hash` stored in the `DocumentVersion` table. If the hashes match, the status is `VERIFIED`. If they differ, it is flagged as `TAMPERED`, updating the `is_tampered` boolean on the version record and logging a critical audit failure.
 
 ### 4.14 Failure + Retry Handling
 If the background extraction pipeline fails (e.g., corrupt PDF, Ollama timeout), the document status is set to `PROCESSING_FAILED` and the error is saved to `failure_reason`. Authorized users can hit the `/retry` endpoint. The `retry_count` is incremented. If the retry count reaches 3, the document is permanently marked as `MANUAL_REVIEW_REQUIRED`, forcing administrative intervention.
@@ -98,31 +98,39 @@ If the background extraction pipeline fails (e.g., corrupt PDF, Ollama timeout),
 ## 5. End-to-End Document Lifecycle
 
 ```mermaid
-stateDiagram-v2
-    [*] --> UPLOADED: User Uploads PDF
-    UPLOADED --> HASHED: SHA-256 Calculation
-    HASHED --> STORED: Save to Disk & DB
-    STORED --> PROCESSING: Background Task Initiated
+graph TD
+    %% User Action
+    A[User Uploads PDF] --> B[Validation & SHA-256 Hashing]
     
-    state ProcessingPhase {
-        PROCESSING --> pypdf: Extract Text
-        pypdf --> pytesseract: OCR Fallback (if needed)
-        pytesseract --> Ollama: AI Metadata Extraction
-        Ollama --> TSVECTOR: Search Indexing
-    }
+    %% API / Storage Layer
+    B --> C[(Supabase Storage)]
+    B --> D[(PostgreSQL DB)]
     
-    ProcessingPhase --> READY: Success
-    ProcessingPhase --> PROCESSING_FAILED: Error Occurs
+    %% Background Processing
+    C & D --> E[Background Task Initiated]
     
-    PROCESSING_FAILED --> ProcessingPhase: Retry (count < 3)
-    PROCESSING_FAILED --> MANUAL_REVIEW_REQUIRED: Max Retries Reached
+    subgraph Processing Pipeline
+        E --> F[Extract Text]
+        F -->|PyPDF| G{Valid Text?}
+        G -- No --> H[PyTesseract OCR]
+        G -- Yes --> I
+        H --> I[Ollama AI Metadata Extraction]
+        I --> J[PostgreSQL TSVECTOR Indexing]
+    end
     
-    READY --> SUBMITTED: Officer Submits
-    SUBMITTED --> UNDER_REVIEW: Supervisor Picks Up
-    UNDER_REVIEW --> APPROVED: Approved
-    UNDER_REVIEW --> REJECTED: Denied
-    REJECTED --> READY: Fix & Resubmit
-    APPROVED --> LOCKED: Finalized
+    %% Final States
+    J -->|Success| K[Status: READY]
+    J -->|Failure| L[Status: PROCESSING_FAILED]
+    
+    L -->|Retry| E
+    L -->|Max Retries| M[MANUAL_REVIEW_REQUIRED]
+    
+    K -->|Officer Submits| N[SUBMITTED]
+    N -->|Review| O{Supervisor Decision}
+    O -- Approve --> P[APPROVED]
+    O -- Reject --> Q[REJECTED]
+    P --> R[LOCKED]
+    Q --> K
 ```
 
 ---
@@ -132,15 +140,13 @@ stateDiagram-v2
 Cases manage the workflow of the overarching investigation. A closed case prevents further document edits or uploads.
 
 ```mermaid
-stateDiagram-v2
-    [*] --> CREATED: Admin/Officer creates case
-    CREATED --> INVESTIGATION: Active investigation starts
-    INVESTIGATION --> UNDER_REVIEW: Case files submitted for review
-    UNDER_REVIEW --> REJECTED: Corrections needed
-    REJECTED --> INVESTIGATION: Resumed
-    UNDER_REVIEW --> APPROVED: Review passed
-    APPROVED --> CLOSED: Terminal State
-    CLOSED --> [*]
+graph TD
+    A[CREATED] -->|Start Investigation| B[INVESTIGATION]
+    B -->|Submit Files| C[UNDER_REVIEW]
+    C -->|Approve| D[APPROVED]
+    C -->|Reject| E[REJECTED]
+    E -->|Corrections| B
+    D -->|Finalize| F[CLOSED]
 ```
 
 ---
@@ -151,7 +157,7 @@ The architecture consists of a decoupled frontend and backend.
 *   **Frontend:** A React/Vite Single Page Application (SPA) utilizing Material UI for styling and axios for API communication.
 *   **Backend:** A FastAPI asynchronous Python application. It handles routing, authorization, and background tasks.
 *   **Database:** PostgreSQL (with SQLite fallback) accessed via SQLAlchemy ORM asynchronously. It stores relational data, TSVECTOR indexes, and JSON metadata.
-*   **Storage:** Local filesystem storage (`./storage`), structured hierarchically by Case ID and Document ID.
+*   **Storage:** Supabase Storage bucket (`SDMS`), structured hierarchically by Case ID and Document ID.
 *   **Background Processing:** FastAPI `BackgroundTasks` handle heavy OCR and AI extraction asynchronously without blocking the HTTP response.
 *   **AI/OCR:** `pytesseract` handles OCR, and a local Ollama instance processes the text for metadata.
 
@@ -167,7 +173,7 @@ graph TD
     subgraph Backend Services
         Backend -->|Auth & RBAC| Auth[Security Module]
         Backend -->|Transactions| DB[(PostgreSQL / SQLite)]
-        Backend -->|File I/O| Disk[(Local Storage)]
+        Backend -->|File I/O| Disk[(Supabase Storage)]
         
         Backend -.->|Background Task| Pipeline[Extraction Pipeline]
         Pipeline -->|pypdf / OCR| PDF[PyTesseract]
@@ -193,7 +199,7 @@ graph TD
 *   **ORM:** SQLAlchemy 2.0 (Async)
 *   **Migration System:** Alembic
 *   **Authentication Libraries:** `PyJWT`, `passlib`, `bcrypt`
-*   **Storage Provider:** Local File System (extensible to S3)
+*   **Storage Provider:** Supabase Storage (`supabase-py`)
 *   **OCR Libraries:** `pypdf`, `pytesseract`, `pdf2image`
 *   **AI Runtime:** Ollama (Local LLM API)
 *   **Search Technology:** PostgreSQL TSVECTOR & TSQUERY
@@ -209,13 +215,12 @@ DMS/
 │   ├── alembic/                # Database migrations
 │   ├── app/                    # Main application code
 │   │   ├── api/                # API Route handlers (auth, cases, documents, search, admin)
-│   │   ├── core/               # Core configuration, security, audit, authorization
+│   │   ├── core/               # Core configuration, security, audit, authorization, storage
 │   │   ├── services/           # Business logic (e.g., OCR & AI extraction)
 │   │   ├── database.py         # DB connection and session setup
 │   │   ├── main.py             # FastAPI entrypoint and lifespan events
 │   │   └── models.py           # SQLAlchemy declarative models
 │   ├── tests/                  # Pytest test suites
-│   ├── storage/                # Local document storage directory
 │   ├── alembic.ini             # Alembic configuration
 │   ├── requirement.txt         # Python dependencies
 │   ├── full_test.py            # Comprehensive API test script
@@ -253,7 +258,7 @@ To run this system locally, the following software must be installed:
 The application is configured primarily through environment variables and sensible defaults:
 *   **Backend Configuration:** Handled by `pydantic-settings` in `app.core.config`. It manages database URLs, JWT secrets, and Ollama endpoint URLs.
 *   **Database Configuration:** Connects to an asynchronous SQLite database (`dms.db`) by default.
-*   **Storage Configuration:** Defaults to local storage (`./storage`).
+*   **Storage Configuration:** Configured to use Supabase Storage, requiring valid `SUPABASE_URL` and `SUPABASE_SERVICE_KEY`.
 *   **AI Configuration:** Assumes Ollama is running on `http://localhost:11434` with the `llama3` model.
 *   **CORS Configuration:** `main.py` is configured to allow all origins (`*`) to support local Vite development.
 
@@ -266,14 +271,14 @@ Create a `.env` file in the `backend/` directory. The application uses these var
 | Name | Purpose | Required | Example |
 | :--- | :--- | :--- | :--- |
 | `DATABASE_URL` | Async database connection string. | No | `sqlite+aiosqlite:///./dms.db` |
-| `STORAGE_TYPE` | Storage backend (`local` or `s3`). | No | `local` |
-| `STORAGE_LOCAL_DIR` | Path to local storage directory. | No | `./storage` |
+| `STORAGE_TYPE` | Storage backend. | No | `local` |
+| `STORAGE_LOCAL_DIR` | Path to local storage directory (Unused fallback). | No | `./storage` |
 | `INITIAL_ADMIN_EMAIL` | Email for the default seeded admin. | No | `admin@gmail.com` |
 | `INITIAL_ADMIN_PASSWORD` | Password for the default seeded admin. | No | `<PLACEHOLDER_PASSWORD>` |
 | `SECRET_KEY` | Key for signing JWT tokens. | No | `<PLACEHOLDER_JWT_SECRET>` |
 | `OLLAMA_BASE_URL` | URL of the local Ollama instance. | No | `http://localhost:11434` |
-| `SUPABASE_URL` | Supabase endpoint if using remote storage. | No | `<PLACEHOLDER_URL>` |
-| `SUPABASE_SERVICE_KEY` | Supabase secret key. | No | `<PLACEHOLDER_KEY>` |
+| `SUPABASE_URL` | Supabase endpoint for remote storage. | Yes | `<PLACEHOLDER_URL>` |
+| `SUPABASE_SERVICE_KEY` | Supabase secret key for storage API. | Yes | `<PLACEHOLDER_KEY>` |
 
 ---
 
@@ -298,7 +303,7 @@ These instructions are strictly for local development setup.
     pip install -r requirement.txt
     ```
 3.  **Prepare the Database & Storage:**
-    The application utilizes SQLAlchemy's `create_all` during startup to build the schema automatically. The `./storage` directory is also auto-created.
+    The application utilizes SQLAlchemy's `create_all` during startup to build the schema automatically. Ensure your Supabase credentials are set in the `.env` file so the storage client can initialize.
 4.  **Install OCR Dependencies (OS Specific):**
     *   *Windows:* Install Tesseract OCR and Poppler binaries, and add them to your system PATH.
     *   *Linux:* `sudo apt install tesseract-ocr poppler-utils`
@@ -385,7 +390,7 @@ During the initial backend startup, the system's `lifespan` event automatically 
 *   `GET /documents/{document_id}/versions` (Auth, View Perm): List historical versions.
 *   `POST /documents/{document_id}/versions` (Auth, Edit Perm): Upload a new version.
 *   `POST /documents/{document_id}/versions/{version_id}/restore` (Auth, Edit Perm): Restore a past version.
-*   `POST /documents/{document_id}/verify-integrity` (Auth): Verify SHA-256 hash against disk.
+*   `POST /documents/{document_id}/verify-integrity` (Auth): Verify SHA-256 hash against Supabase storage file.
 *   `POST /documents/{document_id}/retry` (Auth): Retry a failed processing pipeline.
 
 ### Search
@@ -416,7 +421,7 @@ Because the search endpoint queries the entire database, authorization must be a
 The architecture cleanly separates `Document` (metadata) from `DocumentVersion` (physical file data).
 *   Every upload creates a new `DocumentVersion` with a unique ID, hash, and physical file path.
 *   The parent `Document` record maintains a `current_version_id` pointer.
-*   Old versions are permanently retained in storage and the database.
+*   Old versions are permanently retained in Supabase storage and the database.
 *   The restore endpoint creates a *new* version copy using the old version's physical file, preserving the linear history of the document.
 
 ---
@@ -431,10 +436,10 @@ The `AuditLog` captures exactly *who* did *what* to *which* resource, and *when*
 
 ## 23. Integrity Verification
 
-Sensitive documents must be protected against silent corruption or malicious tampering on disk.
+Sensitive documents must be protected against silent corruption or malicious tampering in remote storage.
 The `/verify-integrity` endpoint automates this:
 1.  Retrieves the expected `file_hash` from the database.
-2.  Reads the actual physical file bytes from `./storage`.
+2.  Retrieves the actual physical file bytes from Supabase Storage.
 3.  Recalculates the SHA-256 hash.
 4.  Compares the hashes. If they differ, the document version is permanently flagged as `is_tampered=True`, and a high-severity `INTEGRITY_FAILURE` audit log is generated.
 
