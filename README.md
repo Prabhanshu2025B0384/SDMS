@@ -432,45 +432,60 @@ The following diagram represents the actual technical lifecycle of a document as
 
 ```mermaid
 flowchart TD
-    %% 1. Ingestion
-    Auth[User Auth & Clearance Validation] --> Upload[Document Creation / Upload]
-    
-    %% 2. Integrity & Storage
-    Upload --> Hash[SHA-256 Calculation]
-    Hash --> Store[(Secure Storage - Supabase)]
-    
-    %% 3. Processing
-    Store --> OCR[Text Extraction & OCR]
-    OCR --> AI[Metadata & Classification via Local AI]
-    AI --> DB[(Database Registration)]
-    
-    %% 4. Lifecycle & Audit
-    DB --> Index[TSVECTOR Search Indexing]
-    Index --> Version[Document Versioning]
-    Version --> Audit1>Audit Logging: Document Uploaded]
-    
-    %% 5. Workflow
-    Audit1 --> Review[Review / Approval Workflow]
-    Review --> Audit2>Audit Logging: Document Approved]
-    
-    %% 6. Finalization
-    Audit2 --> Sign[Digital Signature via RSA-PSS]
-    Sign --> Case[Long-Term Record / Case Association]
-    
-    %% 7. Retrieval & Access
-    Case --> Search[Access Control / Clearance Verification]
-    Search --> View[Document Viewing / Download]
-    View --> Share[Sharing / Collaboration]
-    View --> Verify[Cryptographic Integrity Verification]
-    
-    classDef process fill:#e1f5fe,stroke:#01579b,stroke-width:2px;
-    classDef storage fill:#fff3e0,stroke:#e65100,stroke-width:2px;
-    classDef audit fill:#fce4ec,stroke:#880e4f,stroke-width:2px;
+    %% Continuous Security Mechanisms
+    subgraph Security [Security, Integrity & Audit Layer]
+        direction LR
+        RBAC{{Access Control & Clearance}}
+        Hash{{Cryptographic Hashing & Verify}}
+        Audit{{Immutable Audit Logging}}
+    end
+
+    %% Main Phases
+    subgraph Intake [1. Intake & Classification]
+        direction TB
+        Upload(Document Upload) --> Storage[(Secure Storage)]
+        Storage --> Meta(AI Metadata & Versioning)
+    end
+
+    subgraph Workflow [2. Collaboration & Workflow]
+        direction TB
+        Share(Secure Sharing) --> Review(Review & Approval)
+    end
+
+    subgraph Finalization [3. Record Finalization]
+        direction TB
+        Sign(RSA Digital Signature) --> Case(Case Association)
+    end
+
+    subgraph Retrieval [4. Access & Retrieval]
+        direction TB
+        Search(Permissioned Search) --> View(View / Download)
+    end
+
+    %% Connections between phases
+    Intake ==> Workflow
+    Workflow ==> Finalization
+    Finalization ==> Retrieval
+
+    %% Connections to security layer
+    Intake -.-> Hash
+    Intake -.-> Audit
+    Workflow -.-> RBAC
+    Workflow -.-> Audit
+    Finalization -.-> Audit
+    Finalization -.-> Hash
+    Retrieval -.-> RBAC
+    Retrieval -.-> Hash
+
+    classDef phase fill:#f8f9fa,stroke:#ced4da,stroke-width:2px;
+    classDef action fill:#e1f5fe,stroke:#01579b,stroke-width:1px;
     classDef security fill:#e8f5e9,stroke:#1b5e20,stroke-width:2px;
+    classDef db fill:#fff3e0,stroke:#e65100,stroke-width:1px;
     
-    class Auth,Hash,Sign,Search,Verify security;
-    class Store,DB storage;
-    class Audit1,Audit2 audit;
+    class Intake,Workflow,Finalization,Retrieval phase;
+    class Upload,Meta,Share,Review,Sign,Case,Search,View action;
+    class RBAC,Hash,Audit security;
+    class Storage db;
 ```
 
 **Lifecycle Explanation:**
@@ -484,22 +499,39 @@ The following diagram represents the case-management lifecycle implemented in th
 
 ```mermaid
 flowchart TD
-    Create[Case Creation by Admin] --> Meta[Case Metadata / Classification]
-    Meta --> Assign[Authorized Personnel Assignment]
-    Assign --> Auth[RBAC & Access Boundaries Established]
-    Auth --> Docs[Document / Evidence Association]
-    Docs --> Work[Investigation & Document Updates]
-    Work --> Review[Review / Approval]
-    Review --> Audit>Audit & Integrity Tracking]
-    Audit --> Close[Historical Record / Retrieval]
-    
-    classDef process fill:#e1f5fe,stroke:#01579b,stroke-width:2px;
-    classDef audit fill:#fce4ec,stroke:#880e4f,stroke-width:2px;
+    %% Core Entities & Relationships
+    subgraph Core [Case Ecosystem]
+        direction LR
+        Users([Authorized Users]) <-->|Assigned to| Cases([Case Management])
+        Cases <-->|Contains| Docs([Document Evidence])
+    end
+
+    %% Lifecycle Phases
+    subgraph Lifecycle [Case Progression]
+        direction LR
+        Init(1. Creation & Assignment) --> Active(2. Investigation & Association)
+        Active --> Close(3. Resolution & Archival)
+    end
+
+    %% Security & Control
+    subgraph Control [Security & Accountability]
+        direction LR
+        RBAC{{Access Boundaries}}
+        Audit{{Audit Tracking}}
+    end
+
+    %% Connect them
+    Control -.->|Enforces| Core
+    Core ===> Lifecycle
+    Lifecycle -.->|Generates| Audit
+
+    classDef entity fill:#fff3e0,stroke:#e65100,stroke-width:2px;
+    classDef phase fill:#e1f5fe,stroke:#01579b,stroke-width:1px;
     classDef security fill:#e8f5e9,stroke:#1b5e20,stroke-width:2px;
-    
-    class Create,Meta,Assign,Docs,Work,Review,Close process;
-    class Auth security;
-    class Audit audit;
+
+    class Users,Cases,Docs entity;
+    class Init,Active,Close phase;
+    class RBAC,Audit security;
 ```
 
 **Case Lifecycle Explanation:**
@@ -630,63 +662,55 @@ The system digitizes bureaucratic workflows to eliminate physical delays.
 
 ```mermaid
 flowchart TD
-    subgraph ClientLayer [1. Client / UI Layer]
+    Users([Officers / Admins]) --> Presentation
+
+    subgraph Presentation [1. Presentation Layer]
         UI[React 19 + Vite Frontend]
-        MUI[Material UI Components]
-        UI --- MUI
     end
 
-    subgraph APILayer [2. API / Application Layer]
-        FastAPI[FastAPI Backend]
-        Auth[JWT Authentication]
-        Docs[Document & Case Management]
-        Workflow[State Machine / Approvals]
-    end
-    
-    subgraph SecurityLayer [3. Security & Access Control Layer]
-        RBAC[RBAC & Clearance Hierarchy]
-        Audit[Hash-Chained Audit Logger]
-        Crypto[RSA-PSS Digital Signatures]
-        Hasher[SHA-256 Integrity Verification]
+    Presentation <-->|REST / JWT| Application
+
+    subgraph Application [2. Application & Services]
+        direction LR
+        FastAPI[FastAPI Core]
+        Docs[Case & Doc Management]
+        Workflow[Approvals Workflow]
+        AI[OCR & Local AI]
+        FastAPI --- Docs --- Workflow --- AI
     end
 
-    subgraph DataLayer [4. Data Persistence Layer]
+    Application <-->|Enforces| Security
+
+    subgraph Security [3. Security & Integrity]
+        direction LR
+        RBAC{{RBAC & Clearance}}
+        Hash{{SHA-256 Hashing}}
+        Audit{{Hash-Chained Audit}}
+        Sign{{RSA Signatures}}
+        RBAC --- Hash --- Audit --- Sign
+    end
+
+    Security <-->|Secures Data| Persistence
+    Application <-->|Reads & Writes| Persistence
+
+    subgraph Persistence [4. Storage & Persistence]
+        direction LR
         DB[(Supabase PostgreSQL)]
-        TSV[TSVECTOR Search Index]
-        Meta[Case & Document Metadata]
+        Store[(Supabase Object Storage)]
+        DB --- Store
     end
 
-    subgraph StorageLayer [5. Document / File Storage Layer]
-        Supabase[(Supabase Object Storage)]
-    end
-    
-    subgraph BackgroundLayer [6. Background Processing Layer]
-        Tasks[FastAPI Background Tasks]
-        Extract[PyPDF / PyTesseract OCR]
-        Ollama[Ollama Local LLM]
-    end
+    classDef layer fill:#ffffff,stroke:#333,stroke-width:2px,stroke-dasharray: 5 5;
+    classDef ui fill:#e3f2fd,stroke:#1565c0,stroke-width:2px;
+    classDef app fill:#fff3e0,stroke:#e65100,stroke-width:2px;
+    classDef sec fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px;
+    classDef data fill:#f3e5f5,stroke:#6a1b9a,stroke-width:2px;
 
-    %% Flow connections
-    ClientLayer <-->|HTTP/REST / JWT| FastAPI
-    FastAPI --> Auth
-    FastAPI --> RBAC
-    RBAC --> Docs
-    Docs --> Workflow
-    
-    Docs --> Crypto
-    Docs --> Hasher
-    Docs --> Audit
-    
-    Docs <-->|SQLAlchemy ORM| DB
-    DB --- TSV
-    DB --- Meta
-    
-    Docs -->|supabase-py| Supabase
-    
-    FastAPI --> Tasks
-    Tasks --> Extract
-    Extract --> Ollama
-    Ollama --> DB
+    class Presentation,Application,Security,Persistence layer;
+    class UI ui;
+    class FastAPI,Docs,Workflow,AI app;
+    class RBAC,Hash,Audit,Sign sec;
+    class DB,Store data;
 ```
 
 **Architecture Explanation:**
