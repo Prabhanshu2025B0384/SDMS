@@ -424,44 +424,86 @@ Cleanly integrated into the UI using Material UI components for a polished exper
 
 ---
 
-# 4. END-TO-END DOCUMENT LIFECYCLE
+# 4. LIFECYCLES
 
-The following represents the actual technical lifecycle of a document as it passes through the SDMS architecture.
+## 4.1 End-to-End Document Lifecycle
 
-```markdown
-1. User Authentication (JWT Validation via `get_current_user`)
-      ↓
-2. User Authorization (Validating role & clearance)
-      ↓
-3. Document Upload (FastAPI receives `UploadFile`)
-      ↓
-4. SHA-256 Calculation (`hashlib.sha256(file_bytes)`)
-      ↓
-5. Cloud Storage (`storage.py` uploads bytes to Supabase)
-      ↓
-6. AI Pipeline Trigger (FastAPI `BackgroundTasks`)
-      ↓ 
-    6a. Text Extraction (`pypdf`)
-    6b. OCR Fallback (`pytesseract` if image-based)
-    6c. Local AI Prompting (Ollama LLM)
-    6d. Structured Data Extraction (Regex Fallback)
-      ↓
-7. Database Registration (Insert `Document` & `DocumentVersion`)
-      ↓
-8. Search Indexing (PostgreSQL TSVECTOR updated automatically)
-      ↓
-9. Audit Logging (`log_audit_event` chaining `DOCUMENT_UPLOADED`)
-      ↓
-10. Review Submission (Status → `SUBMITTED`, `ApprovalRequest` created)
-      ↓
-11. Supervisor Review (Supervisor fetches via `check_document_access`)
-      ↓
-12. Approval (Status → `APPROVED`, Audit logged)
-      ↓
-13. Digital Signing (RSA-PSS signature on `DocumentVersion.file_hash`)
-      ↓
-14. Final Download & Integrity Check (SHA-256 cloud vs DB comparison)
+The following diagram represents the actual technical lifecycle of a document as it passes through the SDMS architecture.
+
+```mermaid
+flowchart TD
+    %% 1. Ingestion
+    Auth[User Auth & Clearance Validation] --> Upload[Document Creation / Upload]
+    
+    %% 2. Integrity & Storage
+    Upload --> Hash[SHA-256 Calculation]
+    Hash --> Store[(Secure Storage - Supabase)]
+    
+    %% 3. Processing
+    Store --> OCR[Text Extraction & OCR]
+    OCR --> AI[Metadata & Classification via Local AI]
+    AI --> DB[(Database Registration)]
+    
+    %% 4. Lifecycle & Audit
+    DB --> Index[TSVECTOR Search Indexing]
+    Index --> Version[Document Versioning]
+    Version --> Audit1>Audit Logging: Document Uploaded]
+    
+    %% 5. Workflow
+    Audit1 --> Review[Review / Approval Workflow]
+    Review --> Audit2>Audit Logging: Document Approved]
+    
+    %% 6. Finalization
+    Audit2 --> Sign[Digital Signature via RSA-PSS]
+    Sign --> Case[Long-Term Record / Case Association]
+    
+    %% 7. Retrieval & Access
+    Case --> Search[Access Control / Clearance Verification]
+    Search --> View[Document Viewing / Download]
+    View --> Share[Sharing / Collaboration]
+    View --> Verify[Cryptographic Integrity Verification]
+    
+    classDef process fill:#e1f5fe,stroke:#01579b,stroke-width:2px;
+    classDef storage fill:#fff3e0,stroke:#e65100,stroke-width:2px;
+    classDef audit fill:#fce4ec,stroke:#880e4f,stroke-width:2px;
+    classDef security fill:#e8f5e9,stroke:#1b5e20,stroke-width:2px;
+    
+    class Auth,Hash,Sign,Search,Verify security;
+    class Store,DB storage;
+    class Audit1,Audit2 audit;
 ```
+
+**Lifecycle Explanation:**
+This lifecycle ensures end-to-end security for sensitive documents. **Confidentiality** and **controlled access** are maintained by strict RBAC and clearance validation at both ingestion and retrieval. **Integrity** is proven via immediate SHA-256 hashing at upload, which is later verified against the digital signature and during download. **Traceability** and **evidentiary reliability** are guaranteed because critical state changes (like uploading or approving) immediately generate hash-chained audit logs, preventing malicious alterations to the document's history.
+
+---
+
+## 4.2 Case Lifecycle
+
+The following diagram represents the case-management lifecycle implemented in the system.
+
+```mermaid
+flowchart TD
+    Create[Case Creation by Admin] --> Meta[Case Metadata / Classification]
+    Meta --> Assign[Authorized Personnel Assignment]
+    Assign --> Auth[RBAC & Access Boundaries Established]
+    Auth --> Docs[Document / Evidence Association]
+    Docs --> Work[Investigation & Document Updates]
+    Work --> Review[Review / Approval]
+    Review --> Audit>Audit & Integrity Tracking]
+    Audit --> Close[Historical Record / Retrieval]
+    
+    classDef process fill:#e1f5fe,stroke:#01579b,stroke-width:2px;
+    classDef audit fill:#fce4ec,stroke:#880e4f,stroke-width:2px;
+    classDef security fill:#e8f5e9,stroke:#1b5e20,stroke-width:2px;
+    
+    class Create,Meta,Assign,Docs,Work,Review,Close process;
+    class Auth security;
+    class Audit audit;
+```
+
+**Case Lifecycle Explanation:**
+This lifecycle directly supports the problem statement by centralizing fragmented evidence into isolated, secure workspaces. When a case is created and authorized personnel are assigned, strict access boundaries are drawn. Every document associated with the case inherits the overarching security context, ensuring that investigations remain confidential. Review workflows and hash-chained audit tracking maintain evidentiary integrity throughout the active investigation until the case is preserved as a historical record.
 
 ---
 
@@ -519,45 +561,136 @@ The system digitizes bureaucratic workflows to eliminate physical delays.
 
 # 8. Technology Stack
 
-| Layer | Technology | Actual Role |
-|---|---|---|
-| **Frontend** | React 19 + Vite | Provides a fast, stateless SPA user interface. |
-| **UI Components** | Material UI (MUI) v9 | Ensures a professional, accessible, and consistent design system. |
-| **Backend API** | FastAPI (Python) | High-performance async API handling complex security logic and routing. |
-| **Database** | PostgreSQL | Relational data storage, utilizing advanced features like `TSVECTOR` for search. |
-| **ORM** | SQLAlchemy 2.0 | Asynchronous database querying and model management. |
-| **Storage** | Supabase Object Storage | Horizontally scalable cloud storage for raw PDF binaries. |
-| **Authentication** | PyJWT & passlib | Generates secure access tokens and hashes passwords via bcrypt. |
-| **Cryptography** | `cryptography` (Python) | Executes RSA-PSS-SHA256 signature generation and hash chaining. |
-| **OCR Extraction** | `pypdf` & `pytesseract` | Extracts raw text from digital and scanned PDFs. |
-| **AI Intelligence** | Ollama (Local API) | Performs secure, on-premise NLP metadata extraction. |
+### Frontend
+| Technology | Purpose |
+|------------|---------|
+| React 19 | Library for building the interactive SPA user interface |
+| Vite | High-performance build tool and development server |
+| Material UI (MUI) v9 | Component library for a professional, accessible, and consistent design system |
+| Axios | Promise-based HTTP client for API communication |
+
+### Backend
+| Technology | Purpose |
+|------------|---------|
+| FastAPI (Python) | High-performance async API framework handling complex routing and workflows |
+| Python 3 | Core programming language powering all backend services |
+| SQLAlchemy 2.0 | Asynchronous ORM used for secure database querying and model management |
+
+### Database
+| Technology | Purpose |
+|------------|---------|
+| PostgreSQL | Core relational database utilized for cases, users, and audit records |
+| Supabase PostgreSQL | Managed database provider hosting the active PostgreSQL instance |
+| Alembic | Database migration technology used to track and apply schema changes |
+| PostgreSQL TSVECTOR | Native database capability utilized for permission-aware full-text search |
+
+### Document & File Storage
+| Technology | Purpose |
+|------------|---------|
+| Supabase Object Storage | Horizontally scalable cloud object storage for raw PDF binaries |
+| FastAPI `UploadFile` | Handles high-throughput, non-blocking file ingestion |
+| DocumentVersion Metadata | Normalized database tables to store historical document iterations |
+
+### Security
+| Technology | Purpose |
+|------------|---------|
+| bcrypt (via passlib) | Cryptographic password hashing to prevent plain-text storage |
+| PyJWT | Issues stateless Bearer Tokens for authenticated session management |
+| Role-Based Access Control (RBAC) | Database-level authorization logic to restrict access by role and clearance (Levels 1-5) |
+| SHA-256 (via hashlib) | Cryptographic fingerprinting of documents to prove file integrity |
+| Hash-Chained Audit Logs | Simulation of blockchain immutability in SQL for tamper-evident tracking |
+| RSA-PSS-SHA256 (`cryptography`) | Public-key digital signatures tying human identities to finalized document hashes |
+
+### Search
+| Technology | Purpose |
+|------------|---------|
+| PostgreSQL TSVECTOR / TSQUERY | Provides extremely fast full-text document search capability |
+| SQL `websearch_to_tsquery` | Converts user queries into database search vectors dynamically combined with RBAC filters |
+
+### DevOps / Deployment
+| Technology | Purpose |
+|------------|---------|
+| Uvicorn | ASGI web server running the FastAPI backend |
+| GitHub | Source code control and repository management |
+
+### Testing
+| Technology | Purpose |
+|------------|---------|
+| HTTPX / Asyncio | Executing end-to-end asynchronous regression test suites |
+
+### Development Tools
+| Technology | Purpose |
+|------------|---------|
+| Ollama (Local API) | Secure, on-premise NLP metadata extraction (never transmitting data to public clouds) |
+| PyTesseract / PyPDF | Pipeline for extracting raw text from digital and scanned PDFs |
 
 ---
 
-# 9. Architecture
+# 9. System Architecture
 
 ```mermaid
-graph TD
-    UI[React Frontend / Material UI] -->|REST API + JWT| API[FastAPI Backend]
+flowchart TD
+    subgraph ClientLayer [1. Client / UI Layer]
+        UI[React 19 + Vite Frontend]
+        MUI[Material UI Components]
+        UI --- MUI
+    end
+
+    subgraph APILayer [2. API / Application Layer]
+        FastAPI[FastAPI Backend]
+        Auth[JWT Authentication]
+        Docs[Document & Case Management]
+        Workflow[State Machine / Approvals]
+    end
     
-    API -->|Authenticate| Auth[Security Layer & Auth]
-    API -->|Authorize| RBAC[Access Control / Clearance Logic]
+    subgraph SecurityLayer [3. Security & Access Control Layer]
+        RBAC[RBAC & Clearance Hierarchy]
+        Audit[Hash-Chained Audit Logger]
+        Crypto[RSA-PSS Digital Signatures]
+        Hasher[SHA-256 Integrity Verification]
+    end
+
+    subgraph DataLayer [4. Data Persistence Layer]
+        DB[(Supabase PostgreSQL)]
+        TSV[TSVECTOR Search Index]
+        Meta[Case & Document Metadata]
+    end
+
+    subgraph StorageLayer [5. Document / File Storage Layer]
+        Supabase[(Supabase Object Storage)]
+    end
     
-    RBAC -->|SQLAlchemy| DB[(PostgreSQL)]
-    RBAC -->|Supabase Client| Storage[(Cloud Object Storage)]
+    subgraph BackgroundLayer [6. Background Processing Layer]
+        Tasks[FastAPI Background Tasks]
+        Extract[PyPDF / PyTesseract OCR]
+        Ollama[Ollama Local LLM]
+    end
+
+    %% Flow connections
+    ClientLayer <-->|HTTP/REST / JWT| FastAPI
+    FastAPI --> Auth
+    FastAPI --> RBAC
+    RBAC --> Docs
+    Docs --> Workflow
     
-    %% Processing Pipeline
-    API -->|Upload| Pipeline[Background Task Pipeline]
-    Pipeline -->|1. Extract| OCR[PyTesseract / PyPDF]
-    Pipeline -->|2. Analyze| AI[Ollama Local LLM]
-    Pipeline -->|3. Index| TSV[TSVECTOR Search Index]
+    Docs --> Crypto
+    Docs --> Hasher
+    Docs --> Audit
     
-    %% Security & Auditing
-    API -->|Event| Audit[Audit Logger]
-    Audit -->|SHA-256 Chain| Ledger[(Cryptographic Audit Log)]
+    Docs <-->|SQLAlchemy ORM| DB
+    DB --- TSV
+    DB --- Meta
     
-    API -->|Sign| Crypto[RSA Signature Engine]
+    Docs -->|supabase-py| Supabase
+    
+    FastAPI --> Tasks
+    Tasks --> Extract
+    Extract --> Ollama
+    Ollama --> DB
 ```
+
+**Architecture Explanation:**
+This modular architecture provides a highly robust foundation for Secure DMS. **Scalability** is achieved through the stateless FastAPI backend and decoupled cloud storage, ensuring heavy file uploads do not bottleneck the transactional database. **Security and controlled access** are maintained by placing a rigid Authentication and RBAC layer between the external API requests and internal services. **Integrity and auditability** are inherently woven into the core system—every file transaction is cryptographically logged and hashed before hitting the underlying database and storage layers.
 
 ---
 
