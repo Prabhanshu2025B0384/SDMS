@@ -30,12 +30,10 @@ import {
   FormControl
 } from '@mui/material';
 import { 
-  AddRounded, 
   DescriptionRounded, 
   DownloadRounded, 
   VisibilityRounded, 
   CloudUploadRounded, 
-  FolderRounded,
   CloseRounded,
   RefreshRounded,
   AutoAwesomeRounded,
@@ -60,8 +58,10 @@ const CLEARANCE_LABELS: Record<number, string> = {
   5: 'L5 – Executive'
 };
 
-export default function Documents() {
+export default function SharedDocuments() {
   const [documents, setDocuments] = useState<any[]>([]);
+  const [filteredDocuments, setFilteredDocuments] = useState<any[]>([]);
+  const [searchQuery, setSearchQuery] = useState('');
   const [cases, setCases] = useState<any[]>([]);
   const [open, setOpen] = useState(false);
   const [openCreateCase, setOpenCreateCase] = useState(false);
@@ -174,21 +174,37 @@ export default function Documents() {
   };
 
   const fetchDocuments = async () => {
-    setLoading(true);
     try {
-      const res = await fetch(`http://${window.location.hostname}:8000/documents`, {
+      setLoading(true);
+      const res = await fetch(`http://${window.location.hostname}:8000/documents/shared`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       if (res.ok) {
-        const docs = await res.json();
-        setDocuments(docs);
+        const data = await res.json();
+        setDocuments(data);
+        setFilteredDocuments(data);
       }
     } catch (e) {
-      console.error("Failed to fetch documents:", e);
+      console.error(e);
     } finally {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    if (searchQuery.trim() === '') {
+      setFilteredDocuments(documents);
+    } else {
+      const q = searchQuery.toLowerCase();
+      setFilteredDocuments(
+        documents.filter(d => 
+          d.title.toLowerCase().includes(q) || 
+          d.case_number.toLowerCase().includes(q) || 
+          d.document_type.toLowerCase().includes(q)
+        )
+      );
+    }
+  }, [searchQuery, documents]);
 
   useEffect(() => {
     if (token) {
@@ -529,26 +545,29 @@ export default function Documents() {
     .catch(err => alert("Download failed: " + err.message));
   };
 
-  const getCaseDisplay = (id: string) => {
-    const found = cases.find(c => c.id === id);
-    return found ? `${found.case_number}` : id.substring(0, 8) + '...';
-  };
 
   return (
     <Box>
       <Box sx={{ display: 'flex', alignItems: { xs: 'flex-start', sm: 'center' }, justifyContent: 'space-between', mb: 4, width: '100%', flexDirection: { xs: 'column', sm: 'row' }, gap: { xs: 2, sm: 0 } }}>
         <Box>
           <Typography variant="h4" sx={{ fontWeight: 700 }} gutterBottom>
-            Documents Repository
+            Shared Documents
           </Typography>
           <Breadcrumbs aria-label="breadcrumb">
             <RouterLink to="/" style={{ textDecoration: 'none', color: 'inherit' }}>
               <Typography variant="body2" color="text.primary">Dashboard</Typography>
             </RouterLink>
-            <Typography variant="body2" color="text.secondary">Documents</Typography>
+            <Typography variant="body2" color="text.secondary">Shared Documents</Typography>
           </Breadcrumbs>
         </Box>
-        <Stack direction="row" spacing={1.5}>
+        <Box sx={{ display: 'flex', gap: 2, alignItems: 'center', width: { xs: '100%', sm: 'auto' } }}>
+          <TextField
+            size="small"
+            placeholder="Search shared documents..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            sx={{ bgcolor: 'background.paper', width: { xs: '100%', sm: 300 } }}
+          />
           <Button 
             variant="outlined" 
             startIcon={<RefreshRounded />} 
@@ -557,17 +576,7 @@ export default function Documents() {
           >
             Refresh
           </Button>
-          <Button 
-            variant="contained" 
-            startIcon={<AddRounded />}
-            onClick={() => {
-              setUploadError('');
-              setOpen(true);
-            }}
-          >
-            Upload Document
-          </Button>
-        </Stack>
+        </Box>
       </Box>
 
       <Card>
@@ -576,17 +585,24 @@ export default function Documents() {
             <TableHead>
               <TableRow>
                 <TableCell>Document Title</TableCell>
-                <TableCell>Classification</TableCell>
-                <TableCell>Type</TableCell>
-                <TableCell>Case Reference</TableCell>
-                <TableCell>Document Status</TableCell>
+                <TableCell>Shared By</TableCell>
+                <TableCell>Permissions</TableCell>
+                <TableCell>Date Shared</TableCell>
                 <TableCell align="right">Actions</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
               {loading ? (
                 <TableRow><TableCell colSpan={6} align="center" sx={{ p: 5 }}><CircularProgress size={28} /></TableCell></TableRow>
-              ) : documents.map((doc) => (
+              ) : filteredDocuments.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={6} align="center" sx={{ p: 5 }}>
+                    <Typography variant="body1" color="text.secondary">
+                      No Shared Documents. You haven't received access to any documents yet.
+                    </Typography>
+                  </TableCell>
+                </TableRow>
+              ) : filteredDocuments.map((doc) => (
                 <TableRow key={doc.id} hover>
                   <TableCell>
                     <Box sx={{ display: 'flex', alignItems: 'center' }}>
@@ -600,26 +616,14 @@ export default function Documents() {
                     </Box>
                   </TableCell>
                   <TableCell>
-                    <Chip
-                      icon={<ShieldRounded sx={{ fontSize: '13px !important' }} />}
-                      label={CLEARANCE_LABELS[doc.classification_level || 1] || 'L1'}
-                      size="small"
-                      color={CLEARANCE_COLORS[doc.classification_level || 1] || 'default'}
-                      sx={{ fontWeight: 700, fontSize: 11 }}
-                    />
-                  </TableCell>
-                  <TableCell>
-                    <Chip label={doc.document_type || 'General'} size="small" sx={{ bgcolor: 'rgba(145, 158, 171, 0.16)', fontWeight: 500 }} />
-                  </TableCell>
-                  <TableCell sx={{ color: 'text.secondary', fontWeight: 500 }}>
-                    <Chip icon={<FolderRounded sx={{ fontSize: '16px !important' }} />} label={getCaseDisplay(doc.case_id)} size="small" variant="outlined" />
+                    <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                      {doc.shared_by}
+                    </Typography>
                   </TableCell>
                   <TableCell>
                     <Chip 
-                      label={doc.status === 'READY' ? 'READY / EXTRACTED' : doc.status} 
+                      label={doc.permission_type} 
                       size="small" 
-                      color={doc.status === 'READY' ? 'success' : doc.status === 'PROCESSING' ? 'warning' : doc.status === 'PROCESSING_FAILED' ? 'error' : 'info'} 
-                      sx={{ fontWeight: 700 }}
                     />
                   </TableCell>
                   <TableCell align="right">

@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.future import select
 
 from app.api import admin, auth, cases, documents, search, notifications
-from app.core.security import get_password_hash
+from app.core.security import get_password_hash, verify_password
 from app.core.storage import ensure_storage_ready
 from app.database import AsyncSessionLocal, Base, engine
 from app.models import Case, User
@@ -43,9 +43,24 @@ async def lifespan(app: FastAPI):
             await db.commit()
             await db.refresh(admin_user)
             print(f"Initialized default Admin user: {admin_email}")
-        elif admin_user.clearance_level != 5:
-            admin_user.clearance_level = 5
-            await db.commit()
+        else:
+            changed = False
+            if admin_user.clearance_level != 5:
+                admin_user.clearance_level = 5
+                changed = True
+            if admin_user.role != "Admin":
+                admin_user.role = "Admin"
+                changed = True
+            if not admin_user.is_active:
+                admin_user.is_active = True
+                changed = True
+            if not verify_password(admin_password, admin_user.password_hash):
+                admin_user.password_hash = get_password_hash(admin_password)
+                changed = True
+            
+            if changed:
+                await db.commit()
+                print(f"Updated default Admin user: {admin_email}")
 
     yield
 
@@ -60,7 +75,7 @@ app = FastAPI(
 # Allow CORS for local Vite development
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origin_regex=".*",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

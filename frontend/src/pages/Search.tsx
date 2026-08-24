@@ -33,9 +33,11 @@ import {
   CloseRounded,
   ShieldRounded,
   AutoAwesomeRounded,
-  CheckCircleRounded
+  CheckCircleRounded,
+  ShareRounded
 } from '@mui/icons-material';
 import { useAuth } from '../context/AuthContext';
+import ShareDocumentDialog from '../components/ShareDocumentDialog';
 
 export default function Search() {
   const [query, setQuery] = useState('');
@@ -43,6 +45,9 @@ export default function Search() {
   const [loading, setLoading] = useState(false);
   const [selectedDoc, setSelectedDoc] = useState<any | null>(null);
   const [viewLoading, setViewLoading] = useState(false);
+  
+  const [shareDialogOpen, setShareDialogOpen] = useState(false);
+  const [documentToShare, setDocumentToShare] = useState<any | null>(null);
   
   const [versions, setVersions] = useState<any[]>([]);
   const [versionsLoading, setVersionsLoading] = useState(false);
@@ -293,6 +298,17 @@ export default function Search() {
                       <Button 
                         size="small" 
                         variant="outlined" 
+                        startIcon={<ShareRounded />}
+                        onClick={() => {
+                          setDocumentToShare(result);
+                          setShareDialogOpen(true);
+                        }}
+                      >
+                        Share
+                      </Button>
+                      <Button 
+                        size="small" 
+                        variant="outlined" 
                         color="secondary"
                         startIcon={<DownloadRounded />}
                         onClick={() => handleDownload(result.id, result.title)}
@@ -475,6 +491,16 @@ export default function Search() {
           )}
         </DialogActions>
       </Dialog>
+
+      {documentToShare && (
+        <ShareDocumentDialog
+          open={shareDialogOpen}
+          onClose={() => setShareDialogOpen(false)}
+          documentId={documentToShare.id}
+          documentTitle={documentToShare.title}
+          classificationLevel={documentToShare.classification_level}
+        />
+      )}
     </Box>
   );
 }

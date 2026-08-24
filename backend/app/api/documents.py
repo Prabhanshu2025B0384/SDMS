@@ -129,6 +129,39 @@ async def process_document_background(
 
 # ─── GET DOCUMENTS ──────────────────────────────────────────────────────────
 
+@router.get("/shared")
+async def get_shared_documents(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get all documents explicitly shared with the current user."""
+    query = (
+        select(DocumentPermission, Document, User, Case)
+        .join(Document, DocumentPermission.document_id == Document.id)
+        .join(User, DocumentPermission.granted_by == User.id)
+        .join(Case, Document.case_id == Case.id)
+        .where(DocumentPermission.user_id == current_user.id)
+        .order_by(DocumentPermission.created_at.desc())
+    )
+    result = await db.execute(query)
+    rows = result.all()
+    
+    return [
+        {
+            "id": str(doc.id),
+            "title": doc.title,
+            "document_type": doc.document_type,
+            "classification_level": doc.classification_level or 1,
+            "status": doc.status,
+            "case_id": str(case.id),
+            "case_number": case.case_number,
+            "shared_by": user.email,
+            "permission_type": perm.permission_type,
+            "shared_at": perm.created_at.isoformat() if perm.created_at else None
+        }
+        for perm, doc, user, case in rows
+    ]
+
 @router.get("/")
 async def get_documents(
     db: AsyncSession = Depends(get_db),
@@ -338,6 +371,8 @@ async def share_document(
             raise HTTPException(status_code=403, detail="Only the case owner or Admin can share this document.")
 
     results = []
+    from app.models import Notification
+    
     for uid in payload.user_ids:
         # Check if permission already exists
         existing = await db.execute(
@@ -351,6 +386,14 @@ async def share_document(
             # Update existing permission
             existing_perm.permission_type = payload.permission_type
             results.append({"user_id": uid, "action": "updated", "permission_type": payload.permission_type})
+            
+            notification = Notification(
+                id=uuid.uuid4(),
+                user_id=uid,
+                message=f"Your access to '{doc.title}' was updated to {payload.permission_type} by {current_user.email}.",
+                link=f"/documents?id={doc.id}"
+            )
+            db.add(notification)
         else:
             new_perm = DocumentPermission(
                 id=uuid.uuid4(),
@@ -362,6 +405,14 @@ async def share_document(
             )
             db.add(new_perm)
             results.append({"user_id": uid, "action": "granted", "permission_type": payload.permission_type})
+            
+            notification = Notification(
+                id=uuid.uuid4(),
+                user_id=uid,
+                message=f"You received {payload.permission_type} access to '{doc.title}' from {current_user.email}.",
+                link=f"/documents?id={doc.id}"
+            )
+            db.add(notification)
 
     await db.commit()
 

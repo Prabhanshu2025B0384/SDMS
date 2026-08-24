@@ -82,7 +82,7 @@ export default function AdminDashboard() {
   const [auditData, setAuditData] = useState<{ summary: any; logs: any[] }>({ summary: {}, logs: [] });
   const [loading, setLoading] = useState(false);
   const [auditActionFilter, setAuditActionFilter] = useState('ALL');
-  
+
   // Audit Chain Verification
   const [chainStatus, setChainStatus] = useState<any>(null);
   const [verifyingChain, setVerifyingChain] = useState(false);
@@ -125,7 +125,7 @@ export default function AdminDashboard() {
   const fetchUsers = async () => {
     setLoading(true);
     try {
-      const url = searchQuery 
+      const url = searchQuery
         ? `http://${window.location.hostname}:8000/admin/users?search=${encodeURIComponent(searchQuery)}`
         : `http://${window.location.hostname}:8000/admin/users`;
       const res = await fetch(url, { headers: { 'Authorization': `Bearer ${token}` } });
@@ -297,30 +297,6 @@ export default function AdminDashboard() {
         </Box>
       </Box>
 
-      {/* Hierarchy Level Guide */}
-      <Card sx={{ p: 2.5, mb: 3, background: 'linear-gradient(135deg, rgba(0,167,111,0.08), rgba(0,120,255,0.08))' }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.5 }}>
-          <SecurityRounded color="primary" fontSize="small" />
-          <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>Organizational Clearance Hierarchy</Typography>
-        </Box>
-        <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-          {CLEARANCE_LEVELS.map((lvl) => (
-            <Chip
-              key={lvl}
-              icon={<ShieldRounded />}
-              label={CLEARANCE_LABELS[lvl]}
-              color={CLEARANCE_COLORS[lvl]}
-              variant="outlined"
-              size="small"
-              sx={{ fontWeight: 600 }}
-            />
-          ))}
-        </Box>
-        <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
-          Users can access documents up to their clearance level. Explicitly shared documents override hierarchy rules.
-        </Typography>
-      </Card>
-
       <Card sx={{ borderRadius: 3, overflow: 'hidden' }}>
         <Box sx={{ borderBottom: 1, borderColor: 'divider' }}>
           <Tabs value={tabValue} onChange={(_, v) => setTabValue(v)} sx={{ px: 2 }}>
@@ -338,9 +314,9 @@ export default function AdminDashboard() {
             <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 2, gap: 2 }}>
               <Typography variant="h6" sx={{ fontWeight: 700, flexShrink: 0 }}>User Management & Clearance Levels</Typography>
               <Box sx={{ display: 'flex', gap: 1, flex: 1, justifyContent: 'flex-end' }}>
-                <TextField 
-                  size="small" 
-                  placeholder="Search users..." 
+                <TextField
+                  size="small"
+                  placeholder="Search users..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   sx={{ width: 250 }}
@@ -539,11 +515,11 @@ export default function AdminDashboard() {
               ))}
               <Button size="small" startIcon={<RefreshRounded />} variant="outlined" onClick={() => fetchAuditLogs(auditActionFilter)}>Refresh</Button>
               <Box sx={{ flexGrow: 1 }} />
-              <Button 
-                size="small" 
-                startIcon={<SecurityRounded />} 
-                variant="contained" 
-                color="info" 
+              <Button
+                size="small"
+                startIcon={<SecurityRounded />}
+                variant="contained"
+                color="info"
                 onClick={handleVerifyAuditChain}
                 disabled={verifyingChain}
               >

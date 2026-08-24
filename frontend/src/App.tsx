@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Routes, Route, Link, useLocation, Navigate } from 'react-router-dom';
 import Documents from './pages/Documents';
 import Search from './pages/Search';
+import SharedDocuments from './pages/SharedDocuments';
 import AdminDashboard from './pages/AdminDashboard';
 import Login from './pages/Login';
 import PendingReviews from './pages/PendingReviews';
@@ -26,17 +27,23 @@ import {
   Tooltip,
   Menu,
   MenuItem,
-  Badge
+  Badge,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions
 } from '@mui/material';
 import {
   FolderRounded,
+  FolderSharedRounded,
   SearchRounded,
   NotificationsRounded,
   AdminPanelSettingsRounded,
   LogoutRounded,
   ShieldRounded,
   AccountCircleRounded,
-  PendingActionsRounded
+  PendingActionsRounded,
+  DescriptionRounded
 } from '@mui/icons-material';
 import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -56,6 +63,7 @@ function Sidebar({ mobileOpen, onClose, onProfileClick }: { mobileOpen: boolean;
 
   const menuItems = [
     { title: 'Documents', path: '/documents', icon: <FolderRounded /> },
+    { title: 'Shared Documents', path: '/shared-documents', icon: <FolderSharedRounded /> },
     { title: 'Search', path: '/search', icon: <SearchRounded /> },
     { title: 'Pending Reviews', path: '/pending-reviews', icon: <PendingActionsRounded /> },
   ];
@@ -184,6 +192,21 @@ function Topbar({ onMenuClick, onProfileClick }: { onMenuClick: () => void; onPr
   const navigate = useNavigate();
   const [notifications, setNotifications] = useState<any[]>([]);
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
+  const [clearDialogOpen, setClearDialogOpen] = useState(false);
+
+  const handleClearNotifications = async () => {
+    try {
+      await fetch(`http://${window.location.hostname}:8000/notifications/all`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      setNotifications([]);
+      setClearDialogOpen(false);
+      setAnchorEl(null);
+    } catch (err) {
+      console.error(err);
+    }
+  };
 
   useEffect(() => {
     if (user && token) {
@@ -240,18 +263,105 @@ function Topbar({ onMenuClick, onProfileClick }: { onMenuClick: () => void; onPr
           anchorEl={anchorEl}
           open={Boolean(anchorEl)}
           onClose={() => setAnchorEl(null)}
-          sx={{ '& .MuiPaper-root': { width: 320, maxHeight: 400 } }}
+          transformOrigin={{ horizontal: 'right', vertical: 'top' }}
+          anchorOrigin={{ horizontal: 'right', vertical: 'bottom' }}
+          sx={{
+            '& .MuiPaper-root': {
+              width: 360,
+              mt: 1.5,
+              borderRadius: 3,
+              border: '1px solid rgba(145, 158, 171, 0.16)',
+              overflow: 'hidden'
+            }
+          }}
         >
-          {notifications.length === 0 ? (
-            <MenuItem disabled>No new notifications</MenuItem>
-          ) : (
-            notifications.map(n => (
-              <MenuItem key={n.id} onClick={() => handleNotificationClick(n)} sx={{ whiteSpace: 'normal' }}>
-                <Typography variant="body2">{n.message}</Typography>
-              </MenuItem>
-            ))
-          )}
+          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', px: 2, py: 1.5, borderBottom: '1px solid rgba(145, 158, 171, 0.16)' }}>
+            <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
+              Notifications
+              {notifications.length > 0 && (
+                <Chip label={notifications.length} size="small" color="primary" sx={{ ml: 1, height: 20, fontSize: 11, fontWeight: 700 }} />
+              )}
+            </Typography>
+            {notifications.length > 0 && (
+              <Button size="small" sx={{ fontSize: 12, fontWeight: 600 }} onClick={() => { setClearDialogOpen(true); setAnchorEl(null); }}>
+                Clear notifications
+              </Button>
+            )}
+          </Box>
+          
+          <Box sx={{ maxHeight: 400, overflowY: 'auto', p: 1 }}>
+            {notifications.length === 0 ? (
+              <Box sx={{ p: 4, textAlign: 'center' }}>
+                <NotificationsRounded sx={{ fontSize: 48, color: 'text.disabled', mb: 1, opacity: 0.5 }} />
+                <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>No notifications</Typography>
+                <Typography variant="body2" color="text.secondary">You're all caught up.</Typography>
+              </Box>
+            ) : (
+              notifications.map(n => {
+                let sender = "";
+                let isShare = n.message.includes("You received");
+                if (isShare) {
+                  const parts = n.message.split(" from ");
+                  if (parts.length > 1) sender = parts[1].replace(".", "");
+                }
+                
+                return (
+                  <MenuItem 
+                    key={n.id} 
+                    onClick={() => handleNotificationClick(n)} 
+                    sx={{ 
+                      whiteSpace: 'normal', 
+                      borderRadius: 2, 
+                      p: 1.5, 
+                      mb: 0.5,
+                      alignItems: 'flex-start',
+                      gap: 2,
+                      bgcolor: 'rgba(0, 167, 111, 0.04)',
+                      '&:hover': { bgcolor: 'rgba(0, 167, 111, 0.08)' }
+                    }}
+                  >
+                    <Avatar sx={{ width: 40, height: 40, bgcolor: 'primary.main', color: '#fff', flexShrink: 0 }}>
+                      <DescriptionRounded fontSize="small" />
+                    </Avatar>
+                    <Box sx={{ flexGrow: 1 }}>
+                      <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 0.5 }}>
+                        {isShare ? "Document Access Granted" : "Notification"}
+                      </Typography>
+                      <Typography variant="body2" color="text.primary" sx={{ display: 'block', mb: 0.5 }}>
+                        {n.message.split(" from ")[0]}
+                      </Typography>
+                      {sender && (
+                        <Typography variant="body2" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
+                          from {sender}
+                        </Typography>
+                      )}
+                      {n.created_at && (
+                        <Typography variant="caption" color="text.disabled">
+                          {new Date(n.created_at).toLocaleString()}
+                        </Typography>
+                      )}
+                    </Box>
+                    <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: 'primary.main', mt: 1, flexShrink: 0 }} />
+                  </MenuItem>
+                );
+              })
+            )}
+          </Box>
         </Menu>
+
+        <Dialog open={clearDialogOpen} onClose={() => setClearDialogOpen(false)} maxWidth="xs" fullWidth>
+          <DialogTitle sx={{ fontWeight: 700 }}>Clear all notifications?</DialogTitle>
+          <DialogContent>
+            <Typography variant="body2" color="text.secondary">
+              This will remove all notifications from your notification list.
+            </Typography>
+          </DialogContent>
+          <DialogActions sx={{ p: 2, pt: 0 }}>
+            <Button onClick={() => setClearDialogOpen(false)} color="inherit">Cancel</Button>
+            <Button onClick={handleClearNotifications} variant="contained" color="error">Clear notifications</Button>
+          </DialogActions>
+        </Dialog>
+
         <Tooltip title="My Profile & Password">
           <IconButton sx={{ ml: 1 }} onClick={onProfileClick}>
             <Avatar sx={{ width: 36, height: 36, bgcolor: 'primary.main', fontSize: 13, fontWeight: 700 }}>
@@ -277,6 +387,7 @@ function AuthenticatedLayout() {
         <Routes>
           <Route element={<ProtectedRoute />}>
             <Route path="/documents" element={<Documents />} />
+            <Route path="/shared-documents" element={<SharedDocuments />} />
             <Route path="/search" element={<Search />} />
             <Route path="/pending-reviews" element={<PendingReviews />} />
           </Route>
