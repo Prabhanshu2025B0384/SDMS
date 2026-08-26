@@ -5,6 +5,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.future import select
 
+from app.core.config import settings
+
 from app.api import admin, auth, cases, documents, search, notifications
 from app.core.security import get_password_hash, verify_password
 from app.core.storage import ensure_storage_ready
@@ -72,10 +74,14 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# Allow CORS for local Vite development
+# Use CORS_ORIGINS from settings which defaults to local and supports a comma-separated list
+allow_origins = [url.strip().rstrip('/') for url in settings.CORS_ORIGINS.split(",") if url.strip()]
+if not allow_origins:
+    allow_origins = ["http://localhost:5173", "http://127.0.0.1:5173"]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origin_regex=".*",
+    allow_origins=allow_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -91,3 +97,7 @@ app.include_router(notifications.router)
 @app.get("/")
 async def root():
     return {"message": "Secure DMS Zero-Cost API is running"}
+
+@app.get("/health")
+async def health_check():
+    return {"status": "ok", "message": "Backend is running correctly"}

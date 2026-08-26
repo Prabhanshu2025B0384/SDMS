@@ -1,3 +1,4 @@
+import { API_BASE_URL } from "../config";
 import { useState } from 'react';
 import {
   Dialog, DialogTitle, DialogContent, DialogActions,
@@ -62,7 +63,7 @@ export default function ProfileModal({ open, onClose }: ProfileModalProps) {
 
     setLoading(true);
     try {
-      const res = await fetch(`http://${window.location.hostname}:8000/auth/change-password`, {
+      const res = await fetch(`${API_BASE_URL}/auth/change-password`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,

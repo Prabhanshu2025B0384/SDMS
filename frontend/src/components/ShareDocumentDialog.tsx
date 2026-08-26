@@ -1,3 +1,4 @@
+import { API_BASE_URL } from "../config";
 import { useState, useEffect } from 'react';
 import {
   Dialog, DialogTitle, DialogContent, DialogActions,
@@ -73,7 +74,7 @@ export default function ShareDocumentDialog({
 
   const fetchPermissions = async () => {
     try {
-      const res = await fetch(`http://${window.location.hostname}:8000/documents/${documentId}/permissions`, {
+      const res = await fetch(`${API_BASE_URL}/documents/${documentId}/permissions`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       if (res.ok) {
@@ -87,7 +88,7 @@ export default function ShareDocumentDialog({
 
   const fetchUsers = async () => {
     try {
-      const res = await fetch(`http://${window.location.hostname}:8000/admin/users`, {
+      const res = await fetch(`${API_BASE_URL}/admin/users`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       if (res.ok) {
@@ -125,7 +126,7 @@ export default function ShareDocumentDialog({
     setError('');
     setSuccess('');
     try {
-      const res = await fetch(`http://${window.location.hostname}:8000/documents/${documentId}/permissions`, {
+      const res = await fetch(`${API_BASE_URL}/documents/${documentId}/permissions`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({ user_ids: selectedUsers, permission_type: permissionType })
@@ -147,7 +148,7 @@ export default function ShareDocumentDialog({
 
   const handleRevoke = async (userId: string) => {
     try {
-      const res = await fetch(`http://${window.location.hostname}:8000/documents/${documentId}/permissions/${userId}`, {
+      const res = await fetch(`${API_BASE_URL}/documents/${documentId}/permissions/${userId}`, {
         method: 'DELETE',
         headers: { 'Authorization': `Bearer ${token}` }
       });

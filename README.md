@@ -2,7 +2,7 @@
 
 The Secure Digital Document Management System (SDMS) is a robust, end-to-end platform designed specifically for the rigorous lifecycles of sensitive legal, investigative, and law-enforcement documents. Built on a zero-trust architectural philosophy, it guarantees evidentiary integrity through cryptographic hashing, immutability through chained audit logs, and confidentiality through multi-layered hierarchical clearance controls. 
 
-At its core, this prototype is a React and FastAPI application backed by PostgreSQL and Supabase, featuring integrated OCR, local LLM metadata extraction, and PKI digital signatures.
+At its core, this prototype is a React and FastAPI application backed by PostgreSQL and Supabase, featuring integrated OCR, Gemini AI metadata extraction, and PKI digital signatures.
 
 ---
 
@@ -40,7 +40,7 @@ SDMS is an integrated platform that addresses the complete lifecycle of a legal 
 ↓ 
 **Storage + Versioning + Integrity** (Supabase + Immutable Versions + SHA-256) 
 ↓ 
-**Search / OCR / AI** (PostgreSQL TSVECTOR + PyTesseract + Local Ollama LLM) 
+**Search / OCR / AI** (PostgreSQL TSVECTOR + PyTesseract + Gemini API) 
 ↓ 
 **Sharing / Approval** (Granular permissions + State Machine) 
 ↓ 
@@ -173,10 +173,10 @@ Allows officers to cryptographically sign specific document versions using their
 Provides non-repudiation and legal validity for finalized documents.
 
 ### How it is implemented
-Uses the Python `cryptography` library. When a user creates an account, an RSA key pair is generated (private key encrypted via AES). To sign, the `backend/app/api/documents.py` endpoint fetches the `DocumentVersion.file_hash`, decrypts the user's private key, and generates an RSA-PSS-SHA256 signature, stored in the `DocumentSignature` table.
+Uses the Python `cryptography` library. When a user creates an account, an RSA key pair is generated (the private key is encrypted at rest using a server-side symmetric Fernet key derived from the application secret). To sign, the `backend/app/api/documents.py` endpoint fetches the `DocumentVersion.file_hash`, verifies the user's password, decrypts the user's private key using the server secret, and generates an RSA-PSS-SHA256 signature, stored in the `DocumentSignature` table.
 
 ### Complete lifecycle
-User clicks "Sign" → Enters password/auth → API verifies password → Decrypts private key → Fetches document version hash → Generates RSA signature → Stores signature in DB → UI displays signature badge.
+User clicks "Sign" → Enters password/auth → API verifies password → Decrypts private key via server secret → Fetches document version hash → Generates RSA signature → Stores signature in DB → UI displays signature badge.
 
 ### Security / integrity implications
 Provides **Non-repudiation** and **Accountability**. Cryptographically proves a specific officer authorized a specific, mathematically verified version of a document.
@@ -186,33 +186,33 @@ Resolves evidentiary integrity issues by tying a human identity permanently to a
 
 ### Implementation Assessment
 **Implementation Quality: Adequate**
-The cryptography is robust, though storing private keys on the server (even encrypted) is a known trade-off for usability over hardware tokens.
+The cryptography is robust. Note that private keys are managed server-side and encrypted via a central application secret rather than client-side derived passwords, prioritizing usability over zero-knowledge architectures.
 
 ---
 
-## Feature 6 — Permission-Aware Full-Text Search (TSVECTOR)
+## Feature 6 — Permission-Aware Full-Text Search & AI Metadata Intersection
 
 ### What it does
-Allows rapid retrieval of documents by searching content, metadata, and case details, but only returns results the user is authorized to see.
+Allows rapid retrieval of documents by searching content, case details, and dynamically extracted AI metadata. It supports multi-term intersection (AND logic) using comma-separated queries while enforcing strict authorization filters.
 
 ### Why it exists
-Solves "Difficulty locating documents quickly" without causing "Unauthorized access".
+Solves "Difficulty locating documents quickly" without causing "Unauthorized access". 
 
 ### How it is implemented
-Implemented in `backend/app/api/search.py`. It uses PostgreSQL's native `func.websearch_to_tsquery` to query a `TSVECTOR` index (`Document.search_vector`). Crucially, it dynamically injects the `get_authorized_document_filter(current_user)` SQLAlchemy condition into the `WHERE` clause, physically preventing unauthorized documents from appearing in search results.
+Implemented in `backend/app/api/search.py`. It dynamically splits queries by commas, constructing intersecting `WHERE` clauses for each term. It searches across PostgreSQL `TSVECTOR` indexes (`Document.search_vector`), partial string matches for Case and Title, and critically, directly searches within the dynamic JSONB metadata using `cast(DocumentVersion.structured_data, String).ilike()`. It simultaneously injects the `get_authorized_document_filter(current_user)` SQLAlchemy condition.
 
 ### Complete lifecycle
-User types "bribe" → Frontend sends `?query=bribe` → FastAPI converts to TSQuery → Applies RBAC filters → Ranks results via `ts_rank` → Generates highlight snippets via `ts_headline` → Returns secure JSON → UI renders results.
+User types "Rajnish, stolen bike" → Frontend sends `?query=Rajnish,%20stolen%20bike` → FastAPI splits into terms → Constructs SQL clauses for each term searching OCR vectors and JSON metadata → Applies RBAC filters → Returns secure JSON → UI renders results.
 
 ### Security / integrity implications
 Enforces **Confidentiality**. Prevents metadata leakage where a low-clearance user might deduce confidential case facts just from search result titles.
 
 ### Effect on the Problem Statement
-Balances the need for rapid search/retrieval with absolute confidentiality.
+Balances the need for highly specific, dynamic metadata search/retrieval with absolute confidentiality.
 
 ### Implementation Assessment
 **Implementation Quality: Strong**
-Integrating authorization deeply into the search ORM query is a highly secure architectural pattern.
+Integrating multi-term JSON metadata search directly into the ORM query without abandoning existing authorization filters is robust and scalable.
 
 ---
 
@@ -242,29 +242,29 @@ The fallback mechanism is intelligent, though running heavy OCR in FastAPI backg
 
 ---
 
-## Feature 8 — Local AI-Powered Metadata Extraction (Ollama)
+## Feature 8 — AI-Powered Metadata Extraction (Google Gemini)
 
 ### What it does
-Uses an AI model to read the extracted document text and automatically pull out structured data (FIR Number, Date, Suspects, IPC Sections).
+Uses the Google Gemini API to read extracted document text and dynamically pull out highly relevant structured data (e.g., FIR Number, Date, Suspects, IPC Sections) into structured JSON.
 
 ### Why it exists
-Reduces manual data entry and improves organized case management.
+Reduces manual data entry and dynamically creates searchable metadata based on the natural text content of documents.
 
 ### How it is implemented
-In `backend/app/services/extraction.py`, the extracted OCR text is sent to a local Ollama LLM API instance via a strictly formatted prompt requesting JSON output. If the LLM is unreachable or returns invalid JSON, a robust Regex-based heuristic extractor (`extract_heuristic_structured_data`) acts as an immediate fallback.
+In `backend/app/services/extraction.py`, the system strictly extracts text *first* locally using PyMuPDF or Tesseract OCR. Only the raw extracted text string (truncated to a safe maximum length) is passed to the Gemini API (`google-genai` SDK) utilizing Pydantic schemas to enforce structured JSON output. The PDF file itself is never sent. If the API fails or the key is missing, it falls back to a deterministic Regex-based heuristic extractor.
 
 ### Complete lifecycle
-OCR text extracted → Sent to Ollama `/api/generate` → JSON parsed → Verified → Fallback to Regex if failed → Structured data saved to `DocumentVersion.structured_data` (JSONB) → UI displays smart tags.
+Local text extraction runs (PyMuPDF/OCR) → Raw text sent to Gemini API → Pydantic-enforced JSON received → Verified → Fallback to Regex if failed → Structured data saved to `DocumentVersion.structured_data` (JSON) → UI displays tags.
 
 ### Security / integrity implications
-Because it uses a **local** LLM, it preserves absolute **Confidentiality**. Sensitive case data is never sent to public APIs like OpenAI.
+Maintains strong **Security** by guaranteeing the original PDF binaries or images are never sent over the network to external APIs. Only plain text snippets are processed.
 
 ### Effect on the Problem Statement
 Drives the "Intelligent" requirement of the platform, dramatically speeding up investigative cataloging.
 
 ### Implementation Assessment
-**Implementation Quality: Good**
-The privacy-first local LLM approach combined with a rock-solid regex fallback demonstrates excellent hackathon engineering.
+**Implementation Quality: Strong**
+The pipeline leverages the Strategy Pattern, allowing future swaps to local LLMs, and includes robust truncation and regex fallback mechanisms.
 
 ---
 
@@ -401,7 +401,7 @@ Follows strict industry standards (bcrypt + JWT), refusing to store plain-text p
 ## Feature 14 — Notification & Activity System
 
 ### What it does
-Provides real-time system alerts to users when documents are shared or require review.
+Provides in-app system alerts to users when documents are shared or require review.
 
 ### Why it exists
 Accelerates collaboration and reduces workflow delays.
@@ -424,118 +424,44 @@ Cleanly integrated into the UI using Material UI components for a polished exper
 
 ---
 
-# 4. LIFECYCLES
+# 4. END-TO-END DOCUMENT LIFECYCLE
 
-## 4.1 End-to-End Document Lifecycle
+The following represents the actual technical lifecycle of a document as it passes through the SDMS architecture.
 
-The following diagram represents the actual technical lifecycle of a document as it passes through the SDMS architecture.
-
-```mermaid
-flowchart TD
-    %% Continuous Security Mechanisms
-    subgraph Security [Security, Integrity & Audit Layer]
-        direction LR
-        RBAC{{Access Control & Clearance}}
-        Hash{{Cryptographic Hashing & Verify}}
-        Audit{{Immutable Audit Logging}}
-    end
-
-    %% Main Phases
-    subgraph Intake [1. Intake & Classification]
-        direction TB
-        Upload(Document Upload) --> Storage[(Secure Storage)]
-        Storage --> Meta(AI Metadata & Versioning)
-    end
-
-    subgraph Workflow [2. Collaboration & Workflow]
-        direction TB
-        Share(Secure Sharing) --> Review(Review & Approval)
-    end
-
-    subgraph Finalization [3. Record Finalization]
-        direction TB
-        Sign(RSA Digital Signature) --> Case(Case Association)
-    end
-
-    subgraph Retrieval [4. Access & Retrieval]
-        direction TB
-        Search(Permissioned Search) --> View(View / Download)
-    end
-
-    %% Connections between phases
-    Intake ==> Workflow
-    Workflow ==> Finalization
-    Finalization ==> Retrieval
-
-    %% Connections to security layer
-    Intake -.-> Hash
-    Intake -.-> Audit
-    Workflow -.-> RBAC
-    Workflow -.-> Audit
-    Finalization -.-> Audit
-    Finalization -.-> Hash
-    Retrieval -.-> RBAC
-    Retrieval -.-> Hash
-
-    classDef phase fill:#f8f9fa,stroke:#ced4da,stroke-width:2px;
-    classDef action fill:#e1f5fe,stroke:#01579b,stroke-width:1px;
-    classDef security fill:#e8f5e9,stroke:#1b5e20,stroke-width:2px;
-    classDef db fill:#fff3e0,stroke:#e65100,stroke-width:1px;
-    
-    class Intake,Workflow,Finalization,Retrieval phase;
-    class Upload,Meta,Share,Review,Sign,Case,Search,View action;
-    class RBAC,Hash,Audit security;
-    class Storage db;
+```markdown
+1. User Authentication (JWT Validation via `get_current_user`)
+      ↓
+2. User Authorization (Validating role & clearance)
+      ↓
+3. Document Upload (FastAPI receives `UploadFile`)
+      ↓
+4. SHA-256 Calculation (`hashlib.sha256(file_bytes)`)
+      ↓
+5. Cloud Storage (`storage.py` uploads bytes to Supabase)
+      ↓
+6. AI Pipeline Trigger (FastAPI `BackgroundTasks`)
+      ↓ 
+    6a. Text Extraction (`pypdf`)
+    6b. OCR Fallback (`pytesseract` if image-based)
+    6c. AI Prompting (Gemini API)
+    6d. Structured Data Extraction (Regex Fallback)
+      ↓
+7. Database Registration (Insert `Document` & `DocumentVersion`)
+      ↓
+8. Search Indexing (PostgreSQL TSVECTOR updated automatically)
+      ↓
+9. Audit Logging (`log_audit_event` chaining `DOCUMENT_UPLOADED`)
+      ↓
+10. Review Submission (Status → `SUBMITTED`, `ApprovalRequest` created)
+      ↓
+11. Supervisor Review (Supervisor fetches via `check_document_access`)
+      ↓
+12. Approval (Status → `APPROVED`, Audit logged)
+      ↓
+13. Digital Signing (RSA-PSS signature on `DocumentVersion.file_hash`)
+      ↓
+14. Final Download & Integrity Check (SHA-256 cloud vs DB comparison)
 ```
-
-**Lifecycle Explanation:**
-This lifecycle ensures end-to-end security for sensitive documents. **Confidentiality** and **controlled access** are maintained by strict RBAC and clearance validation at both ingestion and retrieval. **Integrity** is proven via immediate SHA-256 hashing at upload, which is later verified against the digital signature and during download. **Traceability** and **evidentiary reliability** are guaranteed because critical state changes (like uploading or approving) immediately generate hash-chained audit logs, preventing malicious alterations to the document's history.
-
----
-
-## 4.2 Case Lifecycle
-
-The following diagram represents the case-management lifecycle implemented in the system.
-
-```mermaid
-flowchart TD
-    %% Core Entities & Relationships
-    subgraph Core [Case Ecosystem]
-        direction LR
-        Users([Authorized Users]) <-->|Assigned to| Cases([Case Management])
-        Cases <-->|Contains| Docs([Document Evidence])
-    end
-
-    %% Lifecycle Phases
-    subgraph Lifecycle [Case Progression]
-        direction LR
-        Init(1. Creation & Assignment) --> Active(2. Investigation & Association)
-        Active --> Close(3. Resolution & Archival)
-    end
-
-    %% Security & Control
-    subgraph Control [Security & Accountability]
-        direction LR
-        RBAC{{Access Boundaries}}
-        Audit{{Audit Tracking}}
-    end
-
-    %% Connect them
-    Control -.->|Enforces| Core
-    Core ===> Lifecycle
-    Lifecycle -.->|Generates| Audit
-
-    classDef entity fill:#fff3e0,stroke:#e65100,stroke-width:2px;
-    classDef phase fill:#e1f5fe,stroke:#01579b,stroke-width:1px;
-    classDef security fill:#e8f5e9,stroke:#1b5e20,stroke-width:2px;
-
-    class Users,Cases,Docs entity;
-    class Init,Active,Close phase;
-    class RBAC,Audit security;
-```
-
-**Case Lifecycle Explanation:**
-This lifecycle directly supports the problem statement by centralizing fragmented evidence into isolated, secure workspaces. When a case is created and authorized personnel are assigned, strict access boundaries are drawn. Every document associated with the case inherits the overarching security context, ensuring that investigations remain confidential. Review workflows and hash-chained audit tracking maintain evidentiary integrity throughout the active investigation until the case is preserved as a historical record.
 
 ---
 
@@ -575,11 +501,11 @@ Frontend UI hiding is never trusted. Every single FastAPI endpoint enforces depe
 SDMS integrates heavy data extraction with secure retrieval.
 
 **Intelligent Processing (OCR + AI):**
-When a document is uploaded, it enters a background pipeline. `pypdf` extracts standard text. If it detects a scanned image, it falls back to `pytesseract` OCR. The resulting raw text is fed into a **locally hosted Ollama LLM**. The LLM is prompted to return strict JSON containing the FIR Number, Date, Police Station, and IPC Sections. This ensures intelligent metadata extraction without sending sensitive police data to third-party APIs.
+When a document is uploaded, it enters a background pipeline. `pypdf` extracts standard text. If it detects a scanned image, it falls back to `pytesseract` OCR. The resulting raw text is fed into the **Google Gemini API**. The API is prompted to return strict JSON containing the FIR Number, Date, Police Station, and IPC Sections. This ensures intelligent metadata extraction while the pipeline strictly avoids sending sensitive source files or images to external APIs, sending only truncated raw text strings.
 
 **Search Engine (PostgreSQL TSVECTOR):**
 SDMS does not rely on simple SQL `LIKE` queries. It uses PostgreSQL's advanced `TSVECTOR` and `websearch_to_tsquery` to perform full-text search across document titles, metadata, and the raw OCR text. 
-Crucially, search is **Permission-Aware**. The complex RBAC logic is injected directly into the search query, ensuring the database physically filters out restricted documents before the search results are ranked and returned.
+Crucially, search is **Permission-Aware**. The complex RBAC logic is injected directly into the search query, ensuring the database physically filters out restricted documents before the search results are ranked (via `ts_rank`) and returned. Snippet highlights are generated dynamically via application-level parsing.
 
 ---
 
@@ -593,128 +519,45 @@ The system digitizes bureaucratic workflows to eliminate physical delays.
 
 # 8. Technology Stack
 
-### Frontend
-| Technology | Purpose |
-|------------|---------|
-| React 19 | Library for building the interactive SPA user interface |
-| Vite | High-performance build tool and development server |
-| Material UI (MUI) v9 | Component library for a professional, accessible, and consistent design system |
-| Axios | Promise-based HTTP client for API communication |
-
-### Backend
-| Technology | Purpose |
-|------------|---------|
-| FastAPI (Python) | High-performance async API framework handling complex routing and workflows |
-| Python 3 | Core programming language powering all backend services |
-| SQLAlchemy 2.0 | Asynchronous ORM used for secure database querying and model management |
-
-### Database
-| Technology | Purpose |
-|------------|---------|
-| PostgreSQL | Core relational database utilized for cases, users, and audit records |
-| Supabase PostgreSQL | Managed database provider hosting the active PostgreSQL instance |
-| Alembic | Database migration technology used to track and apply schema changes |
-| PostgreSQL TSVECTOR | Native database capability utilized for permission-aware full-text search |
-
-### Document & File Storage
-| Technology | Purpose |
-|------------|---------|
-| Supabase Object Storage | Horizontally scalable cloud object storage for raw PDF binaries |
-| FastAPI `UploadFile` | Handles high-throughput, non-blocking file ingestion |
-| DocumentVersion Metadata | Normalized database tables to store historical document iterations |
-
-### Security
-| Technology | Purpose |
-|------------|---------|
-| bcrypt (via passlib) | Cryptographic password hashing to prevent plain-text storage |
-| PyJWT | Issues stateless Bearer Tokens for authenticated session management |
-| Role-Based Access Control (RBAC) | Database-level authorization logic to restrict access by role and clearance (Levels 1-5) |
-| SHA-256 (via hashlib) | Cryptographic fingerprinting of documents to prove file integrity |
-| Hash-Chained Audit Logs | Simulation of blockchain immutability in SQL for tamper-evident tracking |
-| RSA-PSS-SHA256 (`cryptography`) | Public-key digital signatures tying human identities to finalized document hashes |
-
-### Search
-| Technology | Purpose |
-|------------|---------|
-| PostgreSQL TSVECTOR / TSQUERY | Provides extremely fast full-text document search capability |
-| SQL `websearch_to_tsquery` | Converts user queries into database search vectors dynamically combined with RBAC filters |
-
-### DevOps / Deployment
-| Technology | Purpose |
-|------------|---------|
-| Uvicorn | ASGI web server running the FastAPI backend |
-| GitHub | Source code control and repository management |
-
-### Testing
-| Technology | Purpose |
-|------------|---------|
-| HTTPX / Asyncio | Executing end-to-end asynchronous regression test suites |
-
-### Development Tools
-| Technology | Purpose |
-|------------|---------|
-| Ollama (Local API) | Secure, on-premise NLP metadata extraction (never transmitting data to public clouds) |
-| PyTesseract / PyPDF | Pipeline for extracting raw text from digital and scanned PDFs |
+| Layer | Technology | Actual Role |
+|---|---|---|
+| **Frontend** | React 19 + Vite | Provides a fast, stateless SPA user interface. |
+| **UI Components** | Material UI (MUI) v9 | Ensures a professional, accessible, and consistent design system. |
+| **Backend API** | FastAPI (Python) | High-performance async API handling complex security logic and routing. |
+| **Database** | PostgreSQL | Relational data storage, utilizing advanced features like `TSVECTOR` for search. |
+| **ORM** | SQLAlchemy 2.0 | Asynchronous database querying and model management. |
+| **Storage** | Supabase Object Storage | Horizontally scalable cloud storage for raw PDF binaries. |
+| **Authentication** | PyJWT & passlib | Generates secure access tokens and hashes passwords via bcrypt. |
+| **Cryptography** | `cryptography` (Python) | Executes RSA-PSS-SHA256 signature generation and hash chaining. |
+| **OCR Extraction** | `pypdf` & `pytesseract` | Extracts raw text from digital and scanned PDFs. |
+| **AI Intelligence** | Google Gemini SDK | Performs automated structured JSON metadata extraction. |
 
 ---
 
-# 9. System Architecture
+# 9. Architecture
 
 ```mermaid
-flowchart TD
-    Users([Officers / Admins]) --> Presentation
-
-    subgraph Presentation [1. Presentation Layer]
-        UI[React 19 + Vite Frontend]
-    end
-
-    Presentation <-->|REST / JWT| Application
-
-    subgraph Application [2. Application & Services]
-        direction LR
-        FastAPI[FastAPI Core]
-        Docs[Case & Doc Management]
-        Workflow[Approvals Workflow]
-        AI[OCR & Local AI]
-        FastAPI --- Docs --- Workflow --- AI
-    end
-
-    Application <-->|Enforces| Security
-
-    subgraph Security [3. Security & Integrity]
-        direction LR
-        RBAC{{RBAC & Clearance}}
-        Hash{{SHA-256 Hashing}}
-        Audit{{Hash-Chained Audit}}
-        Sign{{RSA Signatures}}
-        RBAC --- Hash --- Audit --- Sign
-    end
-
-    Security <-->|Secures Data| Persistence
-    Application <-->|Reads & Writes| Persistence
-
-    subgraph Persistence [4. Storage & Persistence]
-        direction LR
-        DB[(Supabase PostgreSQL)]
-        Store[(Supabase Object Storage)]
-        DB --- Store
-    end
-
-    classDef layer fill:#ffffff,stroke:#333,stroke-width:2px,stroke-dasharray: 5 5;
-    classDef ui fill:#e3f2fd,stroke:#1565c0,stroke-width:2px;
-    classDef app fill:#fff3e0,stroke:#e65100,stroke-width:2px;
-    classDef sec fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px;
-    classDef data fill:#f3e5f5,stroke:#6a1b9a,stroke-width:2px;
-
-    class Presentation,Application,Security,Persistence layer;
-    class UI ui;
-    class FastAPI,Docs,Workflow,AI app;
-    class RBAC,Hash,Audit,Sign sec;
-    class DB,Store data;
+graph TD
+    UI[React Frontend / Material UI] -->|REST API + JWT| API[FastAPI Backend]
+    
+    API -->|Authenticate| Auth[Security Layer & Auth]
+    API -->|Authorize| RBAC[Access Control / Clearance Logic]
+    
+    RBAC -->|SQLAlchemy| DB[(PostgreSQL)]
+    RBAC -->|Supabase Client| Storage[(Cloud Object Storage)]
+    
+    %% Processing Pipeline
+    API -->|Upload| Pipeline[Background Task Pipeline]
+    Pipeline -->|1. Extract| OCR[PyTesseract / PyPDF]
+    Pipeline -->|2. Analyze| AI[Gemini API]
+    Pipeline -->|3. Index| TSV[TSVECTOR Search Index]
+    
+    %% Security & Auditing
+    API -->|Event| Audit[Audit Logger]
+    Audit -->|SHA-256 Chain| Ledger[(Cryptographic Audit Log)]
+    
+    API -->|Sign| Crypto[RSA Signature Engine]
 ```
-
-**Architecture Explanation:**
-This modular architecture provides a highly robust foundation for Secure DMS. **Scalability** is achieved through the stateless FastAPI backend and decoupled cloud storage, ensuring heavy file uploads do not bottleneck the transactional database. **Security and controlled access** are maintained by placing a rigid Authentication and RBAC layer between the external API requests and internal services. **Integrity and auditability** are inherently woven into the core system—every file transaction is cryptographically logged and hashed before hitting the underlying database and storage layers.
 
 ---
 
@@ -737,11 +580,11 @@ This modular architecture provides a highly robust foundation for Secure DMS. **
 
 The primary innovation of SDMS is the synthesis of **Enterprise RBAC**, **Cryptographic Integrity**, and **Local Edge AI**.
 
-While many platforms have access control, SDMS integrates authorization *deeply* into its infrastructure. Search results are not filtered post-retrieval; the authorization rules are baked into the PostgreSQL TSVector query. 
+While many platforms have access control, SDMS integrates authorization *deeply* into its infrastructure. Search results are not filtered post-retrieval; the authorization rules are baked directly into the PostgreSQL ORM query, securing both full-text search and dynamic JSON metadata search simultaneously.
 
 Furthermore, the system achieves **Blockchain-level immutability without the blockchain overhead**. By implementing cryptographic hash-chaining within a standard relational database (`previous_hash` + `payload` = `current_hash`), it provides a legally robust Chain of Custody that is exceptionally difficult for internal malicious actors to alter.
 
-Finally, by utilizing a **Local Ollama LLM** with a regex fallback, the system provides cutting-edge automated metadata extraction for law enforcement without ever transmitting sensitive state secrets or victim data to commercial cloud AI providers like OpenAI.
+Finally, the system ensures smart document processing by strictly isolating file storage from AI extraction. It performs all text extraction locally, truncates it safely, and only transmits raw string data to the Gemini API for metadata categorization—never the evidence files themselves.
 
 ---
 
@@ -780,7 +623,7 @@ The stack was chosen purposefully to solve specific domain problems:
 - **FastAPI:** Selected because Python has the richest ecosystem for data extraction (PyPDF, Tesseract, ML integration) while FastAPI provides modern, asynchronous type-safety.
 - **PostgreSQL:** Selected over NoSQL because legal systems require strict ACID compliance, relational case structures, and advanced `TSVECTOR` text search capabilities.
 - **Supabase Storage:** Selected to handle potentially massive PDF binaries cleanly, separating file storage from relational metadata.
-- **Local Ollama:** Selected specifically to satisfy strict legal data-privacy constraints, allowing AI analysis on air-gapped or localized servers.
+- **Google Gemini SDK:** Selected to quickly and accurately extract dynamic JSON metadata schemas from unstructured text, enhancing searchability without manual data entry.
 
 ---
 
@@ -821,7 +664,27 @@ The codebase reflects a balanced, full-stack understanding of frontend UX, backe
 
 ---
 
-# 17. Complete Feature Inventory
+# 17. Current Limitations
+
+While this prototype demonstrates strong security and data extraction capabilities, it currently has a few intentional constraints:
+- **Server-Side Key Management**: RSA private keys are generated and encrypted via a centralized application secret (Fernet), rather than encrypted symmetrically using user-derived passwords. A complete server compromise could expose signing keys.
+- **Frontend Polling**: The real-time notification system and document-sharing updates rely on visibility-aware frontend polling intervals rather than WebSocket pushing.
+- **Background Task Threads**: OCR and Gemini AI processing execute within FastAPI's default background task thread pool. Heavy traffic could bottleneck the API without a dedicated worker queue (e.g., Celery).
+
+---
+
+# 18. Future Enhancements
+
+The following capabilities are planned for future development but are **not yet implemented**:
+- **Hardware-backed PKI Tokens**: Moving away from server-side keys to physical USB/NFC smart cards for digital signatures.
+- **Dedicated Message Queues**: Offloading PyTesseract and AI inference to a dedicated Celery/Redis worker cluster for horizontal scalability.
+- **Local LLM Migration**: While Gemini is used currently, the `MetadataExtractor` strategy pattern allows hot-swapping to a local Ollama server for entirely air-gapped deployments in the future.
+- **Expiring Share Links**: Providing time-bound, publicly accessible (but encrypted) links for temporary external audits.
+- **Email/SMS Notifications**: Extending the in-app notification system to integrate with external SMTP/SMS gateways for offline alerts.
+
+---
+
+# 19. Complete Feature Inventory
 
 ### Security & Integrity Features
 | Feature | What It Does | Main Component | Problem Impact |
@@ -844,11 +707,11 @@ The codebase reflects a balanced, full-stack understanding of frontend UX, backe
 |---|---|---|---|
 | **Auth-Aware Search** | Full-text search filtered by permissions. | `search.py` / PostgreSQL | Solves difficulty locating documents. |
 | **OCR Extraction** | Digitizes scanned PDFs. | `extraction.py` (Tesseract) | Makes physical evidence accessible. |
-| **AI Metadata** | Local LLM structured data extraction. | `extraction.py` (Ollama) | Automates case categorization. |
+| **AI Metadata** | Gemini structured data extraction. | `extraction.py` (Gemini API) | Automates case categorization. |
 
 ---
 
-# 18. Final Project Summary
+# 20. Final Project Summary
 
 The Secure Digital Document Management System (SDMS) solves the critical problem of securely storing, retrieving, and verifying sensitive legal and investigative documents. It is designed for law enforcement, courts, and investigative agencies who cannot rely on standard file-sharing solutions due to strict evidentiary requirements. 
 

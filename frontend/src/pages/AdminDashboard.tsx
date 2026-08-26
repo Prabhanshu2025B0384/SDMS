@@ -1,3 +1,4 @@
+import { API_BASE_URL } from "../config";
 import { useState, useEffect } from 'react';
 import {
   Box, Card, Typography, Tabs, Tab, Table, TableBody, TableCell,
@@ -27,11 +28,12 @@ const CLEARANCE_COLORS: Record<number, 'default' | 'info' | 'warning' | 'error' 
   1: 'default', 2: 'info', 3: 'warning', 4: 'error', 5: 'success'
 };
 const ACTION_ICON: Record<string, any> = {
-  VIEW: <VisibilityRounded sx={{ fontSize: 16 }} />,
-  DOWNLOAD: <GetAppRounded sx={{ fontSize: 16 }} />,
-  UPLOAD: <UploadFileRounded sx={{ fontSize: 16 }} />,
-  LOGIN: <LoginRounded sx={{ fontSize: 16 }} />,
-  SHARE: <ShareRounded sx={{ fontSize: 16 }} />,
+  DOCUMENT_VIEWED: <VisibilityRounded sx={{ fontSize: 16 }} />,
+  DOCUMENT_DOWNLOADED: <GetAppRounded sx={{ fontSize: 16 }} />,
+  DOCUMENT_UPLOADED: <UploadFileRounded sx={{ fontSize: 16 }} />,
+  LOGIN_SUCCESS: <LoginRounded sx={{ fontSize: 16 }} />,
+  LOGIN_FAILED: <BlockRounded sx={{ fontSize: 16 }} />,
+  DOCUMENT_SHARED: <ShareRounded sx={{ fontSize: 16 }} />,
   PASSWORD_CHANGE: <ShieldRounded sx={{ fontSize: 16 }} />,
   DOCUMENT_SIGNED: <VerifiedUserRounded sx={{ fontSize: 16 }} />,
   SIGNATURE_VERIFIED: <CheckCircleRounded sx={{ fontSize: 16 }} />,
@@ -43,8 +45,8 @@ const ACTION_ICON: Record<string, any> = {
   USER_UPDATED: <EditRounded sx={{ fontSize: 16 }} />
 };
 const ACTION_COLOR: Record<string, 'default' | 'info' | 'warning' | 'success' | 'error' | 'primary' | 'secondary'> = {
-  VIEW: 'info', DOWNLOAD: 'warning', UPLOAD: 'success', LOGIN: 'default',
-  SHARE: 'primary', PASSWORD_CHANGE: 'secondary',
+  DOCUMENT_VIEWED: 'info', DOCUMENT_DOWNLOADED: 'warning', DOCUMENT_UPLOADED: 'success', LOGIN_SUCCESS: 'default',
+  LOGIN_FAILED: 'error', DOCUMENT_SHARED: 'primary', PASSWORD_CHANGE: 'secondary',
   DOCUMENT_SIGNED: 'success', SIGNATURE_VERIFIED: 'success',
   SIGNATURE_VERIFICATION_FAILED: 'error', SIGNATURE_ATTEMPT_FAILED: 'error',
   UNAUTHORIZED_ACCESS_ATTEMPT: 'error', USER_DEACTIVATED: 'error',
@@ -126,8 +128,8 @@ export default function AdminDashboard() {
     setLoading(true);
     try {
       const url = searchQuery
-        ? `http://${window.location.hostname}:8000/admin/users?search=${encodeURIComponent(searchQuery)}`
-        : `http://${window.location.hostname}:8000/admin/users`;
+        ? `${API_BASE_URL}/admin/users?search=${encodeURIComponent(searchQuery)}`
+        : `${API_BASE_URL}/admin/users`;
       const res = await fetch(url, { headers: { 'Authorization': `Bearer ${token}` } });
       if (res.ok) setUsers(await res.json());
     } finally { setLoading(false); }
@@ -136,7 +138,7 @@ export default function AdminDashboard() {
   const fetchCases = async () => {
     setLoading(true);
     try {
-      const res = await fetch(`http://${window.location.hostname}:8000/admin/cases`, { headers: { 'Authorization': `Bearer ${token}` } });
+      const res = await fetch(`${API_BASE_URL}/admin/cases`, { headers: { 'Authorization': `Bearer ${token}` } });
       if (res.ok) setCases(await res.json());
     } finally { setLoading(false); }
   };
@@ -146,7 +148,7 @@ export default function AdminDashboard() {
     try {
       const params = new URLSearchParams();
       if (action && action !== 'ALL') params.set('action', action);
-      const res = await fetch(`http://${window.location.hostname}:8000/admin/audit-logs?${params}`, { headers: { 'Authorization': `Bearer ${token}` } });
+      const res = await fetch(`${API_BASE_URL}/admin/audit-logs?${params}`, { headers: { 'Authorization': `Bearer ${token}` } });
       if (res.ok) setAuditData(await res.json());
     } finally { setLoading(false); }
   };
@@ -155,7 +157,7 @@ export default function AdminDashboard() {
     setVerifyingChain(true);
     setChainStatus(null);
     try {
-      const res = await fetch(`http://${window.location.hostname}:8000/admin/audit-logs/verify-chain`, { headers: { 'Authorization': `Bearer ${token}` } });
+      const res = await fetch(`${API_BASE_URL}/admin/audit-logs/verify-chain`, { headers: { 'Authorization': `Bearer ${token}` } });
       const data = await res.json();
       setChainStatus(data);
     } catch (e) {
@@ -189,7 +191,7 @@ export default function AdminDashboard() {
         department: newUserForm.department,
         clearance_level: String(newUserForm.clearance_level)
       });
-      const res = await fetch(`http://${window.location.hostname}:8000/auth/signup?${queryParams}`, { method: 'POST' });
+      const res = await fetch(`${API_BASE_URL}/auth/signup?${queryParams}`, { method: 'POST' });
       if (res.ok) {
         setOpenAddUser(false);
         setNewUserForm({ email: '', password: '', full_name: '', role: 'Investigating Officer', department: 'General', clearance_level: 1 });
@@ -208,7 +210,7 @@ export default function AdminDashboard() {
     try {
       const payload: any = { ...editUserForm };
       if (!payload.password) delete payload.password;
-      const res = await fetch(`http://${window.location.hostname}:8000/admin/users/${editingUserId}`, {
+      const res = await fetch(`${API_BASE_URL}/admin/users/${editingUserId}`, {
         method: 'PATCH', headers, body: JSON.stringify(payload)
       });
       if (res.ok) {
@@ -226,8 +228,8 @@ export default function AdminDashboard() {
     setIsDeleting(true);
     try {
       const url = deleteConfirm.type === 'user'
-        ? `http://${window.location.hostname}:8000/admin/users/${deleteConfirm.id}`
-        : `http://${window.location.hostname}:8000/admin/cases/${deleteConfirm.id}`;
+        ? `${API_BASE_URL}/admin/users/${deleteConfirm.id}`
+        : `${API_BASE_URL}/admin/cases/${deleteConfirm.id}`;
       const res = await fetch(url, { method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` } });
       if (res.ok) {
         deleteConfirm.type === 'user' ? fetchUsers() : fetchCases();
@@ -243,7 +245,7 @@ export default function AdminDashboard() {
 
   const handleToggleUserStatus = async (user: any) => {
     try {
-      const res = await fetch(`http://${window.location.hostname}:8000/admin/users/${user.id}`, {
+      const res = await fetch(`${API_BASE_URL}/admin/users/${user.id}`, {
         method: 'PATCH', headers,
         body: JSON.stringify({ is_active: !user.is_active })
       });
@@ -260,7 +262,7 @@ export default function AdminDashboard() {
     if (!selectedCaseForAssign || !selectedOfficerId) return;
     setAssigningOfficer(true);
     try {
-      const res = await fetch(`http://${window.location.hostname}:8000/cases/${selectedCaseForAssign.id}/reassign`, {
+      const res = await fetch(`${API_BASE_URL}/cases/${selectedCaseForAssign.id}/reassign`, {
         method: 'PATCH', headers, body: JSON.stringify({ officer_id: selectedOfficerId })
       });
       if (res.ok) { setOpenAssignModal(false); fetchCases(); }
@@ -502,7 +504,7 @@ export default function AdminDashboard() {
             {/* Filter */}
             <Box sx={{ display: 'flex', gap: 1.5, mb: 2, flexWrap: 'wrap', alignItems: 'center' }}>
               <Typography variant="subtitle2">Filter by action:</Typography>
-              {['ALL', 'VIEW', 'DOWNLOAD', 'UPLOAD', 'LOGIN', 'SHARE', 'PASSWORD_CHANGE', 'DOCUMENT_SIGNED', 'SIGNATURE_VERIFIED', 'SIGNATURE_VERIFICATION_FAILED', 'SIGNATURE_ATTEMPT_FAILED', 'UNAUTHORIZED_ACCESS_ATTEMPT', 'USER_DEACTIVATED'].map((a) => (
+              {['ALL', 'DOCUMENT_VIEWED', 'DOCUMENT_DOWNLOADED', 'DOCUMENT_UPLOADED', 'LOGIN_SUCCESS', 'LOGIN_FAILED', 'DOCUMENT_SHARED', 'PASSWORD_CHANGE', 'DOCUMENT_SIGNED', 'SIGNATURE_VERIFIED', 'SIGNATURE_VERIFICATION_FAILED', 'SIGNATURE_ATTEMPT_FAILED', 'UNAUTHORIZED_ACCESS_ATTEMPT', 'USER_DEACTIVATED'].map((a) => (
                 <Chip
                   key={a}
                   label={a}

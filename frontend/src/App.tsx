@@ -1,3 +1,4 @@
+import { API_BASE_URL } from "./config";
 import { useState } from 'react';
 import { Routes, Route, Link, useLocation, Navigate } from 'react-router-dom';
 import Documents from './pages/Documents';
@@ -196,7 +197,7 @@ function Topbar({ onMenuClick, onProfileClick }: { onMenuClick: () => void; onPr
 
   const handleClearNotifications = async () => {
     try {
-      await fetch(`http://${window.location.hostname}:8000/notifications/all`, {
+      await fetch(`${API_BASE_URL}/notifications/all`, {
         method: 'DELETE',
         headers: { 'Authorization': `Bearer ${token}` }
       });
@@ -210,7 +211,7 @@ function Topbar({ onMenuClick, onProfileClick }: { onMenuClick: () => void; onPr
 
   useEffect(() => {
     if (user && token) {
-      fetch(`http://${window.location.hostname}:8000/notifications`, {
+      fetch(`${API_BASE_URL}/notifications`, {
         headers: { 'Authorization': `Bearer ${token}` }
       })
       .then(res => res.json())
@@ -221,7 +222,7 @@ function Topbar({ onMenuClick, onProfileClick }: { onMenuClick: () => void; onPr
 
   const handleNotificationClick = async (notif: any) => {
     try {
-      await fetch(`http://${window.location.hostname}:8000/notifications/${notif.id}/read`, {
+      await fetch(`${API_BASE_URL}/notifications/${notif.id}/read`, {
         method: 'PATCH',
         headers: { 'Authorization': `Bearer ${token}` }
       });

@@ -1,3 +1,4 @@
+import { API_BASE_URL } from "../config";
 import { useState, useEffect } from 'react';
 import { Box, Card, Typography, TextField, Button, Alert, Stack, InputAdornment, IconButton } from '@mui/material';
 import { Visibility, VisibilityOff } from '@mui/icons-material';
@@ -29,7 +30,7 @@ export default function Login() {
       formData.append('username', email);
       formData.append('password', password);
 
-      const response = await fetch(`http://${window.location.hostname}:8000/auth/login`, {
+      const response = await fetch(`${API_BASE_URL}/auth/login`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded',
@@ -41,7 +42,7 @@ export default function Login() {
         const data = await response.json();
         const token = data.access_token;
 
-        const meRes = await fetch(`http://${window.location.hostname}:8000/auth/me`, {
+        const meRes = await fetch(`${API_BASE_URL}/auth/me`, {
           headers: { 'Authorization': `Bearer ${token}` }
         });
 
@@ -54,13 +55,25 @@ export default function Login() {
           } else {
             navigate('/documents');
           }
+        } else {
+           setError('Failed to fetch user profile after login.');
         }
       } else {
-        const errData = await response.json();
-        setError(errData.detail || 'Login failed');
+        const errData = await response.json().catch(() => ({}));
+        if (response.status === 401) {
+            setError(errData.detail || 'Invalid email or password.');
+        } else if (response.status === 422) {
+            setError('Validation Error: Please check your input format.');
+        } else {
+            setError(errData.detail || `Login failed (HTTP ${response.status})`);
+        }
       }
-    } catch (err) {
-      setError('An error occurred connecting to the server.');
+    } catch (err: any) {
+      if (err.name === 'TypeError' && err.message.includes('Failed to fetch')) {
+        setError('Backend is unreachable or CORS policy blocked the request. Please verify the API URL and backend status.');
+      } else {
+        setError('An error occurred connecting to the server: ' + (err.message || String(err)));
+      }
     }
   };
 

@@ -320,7 +320,12 @@ async def list_audit_logs(
     query = select(AuditLog).order_by(AuditLog.timestamp.desc())
 
     if action and action != "ALL":
-        query = query.where(AuditLog.action == action)
+        if action == "VIEW": query = query.where(AuditLog.action == "DOCUMENT_VIEWED")
+        elif action == "DOWNLOAD": query = query.where(AuditLog.action == "DOCUMENT_DOWNLOADED")
+        elif action == "UPLOAD": query = query.where(AuditLog.action == "DOCUMENT_UPLOADED")
+        elif action == "LOGIN": query = query.where(AuditLog.action.in_(["LOGIN_SUCCESS", "LOGIN_FAILED"]))
+        elif action == "SHARE": query = query.where(AuditLog.action == "DOCUMENT_SHARED")
+        else: query = query.where(AuditLog.action == action)
     if user_id:
         query = query.where(AuditLog.user_id == user_id)
     if document_id:
@@ -337,11 +342,11 @@ async def list_audit_logs(
 
     # Summary metrics
     total = len(logs)
-    total_views = sum(1 for l in logs if l.action == "VIEW")
-    total_downloads = sum(1 for l in logs if l.action == "DOWNLOAD")
-    total_uploads = sum(1 for l in logs if l.action == "UPLOAD")
-    total_logins = sum(1 for l in logs if l.action == "LOGIN")
-    total_shares = sum(1 for l in logs if l.action == "SHARE")
+    total_views = sum(1 for l in logs if l.action == "DOCUMENT_VIEWED")
+    total_downloads = sum(1 for l in logs if l.action == "DOCUMENT_DOWNLOADED")
+    total_uploads = sum(1 for l in logs if l.action == "DOCUMENT_UPLOADED")
+    total_logins = sum(1 for l in logs if l.action == "LOGIN_SUCCESS")
+    total_shares = sum(1 for l in logs if l.action == "DOCUMENT_SHARED")
     unique_users = len(set(str(l.user_id) for l in logs if l.user_id))
 
     return {

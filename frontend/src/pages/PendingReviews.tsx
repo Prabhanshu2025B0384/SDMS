@@ -1,3 +1,4 @@
+import { API_BASE_URL } from "../config";
 import { useEffect, useState } from 'react';
 import { 
   Box, 
@@ -41,7 +42,7 @@ export default function PendingReviews() {
   const fetchReviews = async () => {
     try {
       setLoading(true);
-      const res = await fetch(`http://${window.location.hostname}:8000/documents/pending-reviews`, {
+      const res = await fetch(`${API_BASE_URL}/documents/pending-reviews`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       if (res.ok) {

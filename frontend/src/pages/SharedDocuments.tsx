@@ -1,3 +1,4 @@
+import { API_BASE_URL } from "../config";
 import { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
@@ -75,28 +76,64 @@ export default function SharedDocuments() {
   const [searchParams, setSearchParams] = useSearchParams();
   const deepLinkId = searchParams.get('id');
 
-  const fetchDocuments = async () => {
+  const fetchDocuments = async (silent = false) => {
     try {
-      setLoading(true);
-      const res = await fetch(`http://${window.location.hostname}:8000/documents/shared`, {
+      if (!silent) setLoading(true);
+      const res = await fetch(`${API_BASE_URL}/documents/shared`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       if (res.ok) {
         const data = await res.json();
         setDocuments(data);
-        setFilteredDocuments(data);
       }
     } catch (e) {
       console.error(e);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
   useEffect(() => {
-    if (token) {
-      fetchDocuments();
+    if (!token) return;
+    
+    // Initial fetch
+    fetchDocuments(false);
+    
+    // Setup visibility-aware polling
+    let intervalId: ReturnType<typeof setInterval> | null = null;
+    
+    const startPolling = () => {
+      if (!intervalId) {
+        intervalId = setInterval(() => fetchDocuments(true), 5000);
+      }
+    };
+    
+    const stopPolling = () => {
+      if (intervalId) {
+        clearInterval(intervalId);
+        intervalId = null;
+      }
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        fetchDocuments(true);
+        startPolling();
+      } else {
+        stopPolling();
+      }
+    };
+
+    if (document.visibilityState === 'visible') {
+      startPolling();
     }
+    
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    
+    return () => {
+      stopPolling();
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
   }, [token]);
 
   useEffect(() => {
@@ -117,7 +154,7 @@ export default function SharedDocuments() {
 
   const handleViewDetails = async (doc: any) => {
     try {
-      const res = await fetch(`http://${window.location.hostname}:8000/documents/${doc.id}`, {
+      const res = await fetch(`${API_BASE_URL}/documents/${doc.id}`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       if (res.ok) {
@@ -135,7 +172,7 @@ export default function SharedDocuments() {
   const fetchVersions = async (docId: string) => {
     setVersionsLoading(true);
     try {
-      const res = await fetch(`http://${window.location.hostname}:8000/documents/${docId}/versions`, {
+      const res = await fetch(`${API_BASE_URL}/documents/${docId}/versions`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       if (res.ok) setVersions(await res.json());
@@ -149,7 +186,7 @@ export default function SharedDocuments() {
   const fetchAuditHistory = async (docId: string) => {
     setAuditLoading(true);
     try {
-      const res = await fetch(`http://${window.location.hostname}:8000/documents/${docId}/audit-history`, {
+      const res = await fetch(`${API_BASE_URL}/documents/${docId}/audit-history`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       if (res.ok) setAuditLogs(await res.json());
@@ -165,7 +202,7 @@ export default function SharedDocuments() {
     setIntegrityError('');
     setIntegrityVerified(false);
     try {
-      const res = await fetch(`http://${window.location.hostname}:8000/documents/${selectedDoc.id}/verify-integrity`, {
+      const res = await fetch(`${API_BASE_URL}/documents/${selectedDoc.id}/verify-integrity`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}` }
       });
@@ -181,7 +218,7 @@ export default function SharedDocuments() {
   };
 
   const handleDownload = (docId: string, title: string) => {
-    fetch(`http://${window.location.hostname}:8000/documents/${docId}/download`, {
+    fetch(`${API_BASE_URL}/documents/${docId}/download`, {
       headers: { 'Authorization': `Bearer ${token}` }
     })
     .then(res => {
@@ -203,7 +240,7 @@ export default function SharedDocuments() {
   const handleVerifySignature = async (docId: string, versionId: string) => {
     setSigDetails(null);
     try {
-      const res = await fetch(`http://${window.location.hostname}:8000/documents/${docId}/versions/${versionId}/verify-signature`, { headers: { 'Authorization': `Bearer ${token}` } });
+      const res = await fetch(`${API_BASE_URL}/documents/${docId}/versions/${versionId}/verify-signature`, { headers: { 'Authorization': `Bearer ${token}` } });
       const data = await res.json();
       setSigDetails(data);
       setOpenSigModal(true);
@@ -337,7 +374,7 @@ export default function SharedDocuments() {
                         </Tooltip>
                         {canDownload && (
                           <Tooltip title="Download PDF">
-                            <IconButton color="primary" onClick={() => window.open(`http://${window.location.hostname}:8000/documents/${doc.id}/download?token=${token}`, '_blank')}>
+                            <IconButton color="primary" onClick={() => window.open(`${API_BASE_URL}/documents/${doc.id}/download?token=${token}`, '_blank')}>
                               <DownloadRounded />
                             </IconButton>
                           </Tooltip>
@@ -404,14 +441,16 @@ export default function SharedDocuments() {
                     <AutoAwesomeRounded sx={{ fontSize: 18 }} /> AI-Extracted Structured Metadata
                   </Typography>
                   <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, gap: 1.5 }}>
-                    <Typography variant="body2"><strong>FIR / Ref No:</strong> {selectedDoc.structured_data.fir_number || 'N/A'}</Typography>
-                    <Typography variant="body2"><strong>Incident Date:</strong> {selectedDoc.structured_data.incident_date || 'N/A'}</Typography>
-                    <Typography variant="body2"><strong>Police Station:</strong> {selectedDoc.structured_data.police_station || 'N/A'}</Typography>
-                    <Typography variant="body2"><strong>Complainant:</strong> {selectedDoc.structured_data.complainant || 'N/A'}</Typography>
-                    <Typography variant="body2"><strong>Accused:</strong> {selectedDoc.structured_data.accused || 'N/A'}</Typography>
-                    <Typography variant="body2">
-                      <strong>IPC / Legal Sections:</strong> {Array.isArray(selectedDoc.structured_data.ipc_sections) ? selectedDoc.structured_data.ipc_sections.join(', ') : selectedDoc.structured_data.ipc_sections || 'N/A'}
-                    </Typography>
+                    {Object.entries(selectedDoc.structured_data).map(([key, val]) => {
+                      if (val === null || val === undefined || val === '') return null;
+                      const formattedKey = key.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
+                      const formattedVal = Array.isArray(val) ? val.join(', ') : String(val);
+                      return (
+                        <Typography variant="body2" key={key}>
+                          <strong>{formattedKey}:</strong> {formattedVal}
+                        </Typography>
+                      );
+                    })}
                   </Box>
                 </Card>
               )}

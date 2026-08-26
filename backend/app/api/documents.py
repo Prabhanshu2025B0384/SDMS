@@ -53,7 +53,8 @@ async def process_document_background(
     document_id: str,
     version_id: str,
     file_bytes: bytes,
-    user_id: str
+    user_id: str,
+    document_type: str
 ):
     """Background task to run text extraction and AI metadata processing."""
     temp_path = None
@@ -62,7 +63,7 @@ async def process_document_background(
             tmp.write(file_bytes)
             temp_path = tmp.name
 
-        extracted = process_document_pipeline(temp_path)
+        extracted = process_document_pipeline(temp_path, document_type)
 
         async with AsyncSessionLocal() as session:
             ver_result = await session.execute(
@@ -471,6 +472,9 @@ async def upload_document(
     if not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF files are supported")
 
+    if classification_level > (current_user.clearance_level or 1):
+        raise HTTPException(status_code=400, detail="Cannot upload a document with a classification higher than your clearance.")
+
     case_result = await db.execute(select(Case).where(Case.id == case_id))
     case = case_result.scalar_one_or_none()
     if not case:
@@ -550,7 +554,8 @@ async def upload_document(
         document_id=str(new_doc.id),
         version_id=str(new_version.id),
         file_bytes=file_bytes,
-        user_id=str(current_user.id)
+        user_id=str(current_user.id),
+        document_type=document_type
     )
 
     # Audit Log
@@ -634,7 +639,8 @@ async def create_document_version(
         document_id=str(doc.id),
         version_id=str(new_version.id),
         file_bytes=file_bytes,
-        user_id=str(current_user.id)
+        user_id=str(current_user.id),
+        document_type=doc.document_type
     )
     
     await log_document_action(db, current_user.id, "DOCUMENT_VERSION_UPLOADED", doc.id, doc.case_id,
@@ -761,6 +767,7 @@ class StatusPayload(BaseModel):
     status: str
     reason: Optional[str] = None
     reviewer_id: Optional[str] = None
+    classification_level: Optional[int] = None
 
 
 @router.post("/{document_id}/status")
@@ -858,6 +865,11 @@ async def update_document_status(
             if case and str(case.owning_officer_id) == str(current_user.id) and current_user.role != "Admin":
                 raise HTTPException(status_code=403, detail="Investigating officer cannot approve their own document")
             
+    if payload.classification_level is not None:
+        if payload.classification_level > (current_user.clearance_level or 1):
+            raise HTTPException(status_code=400, detail="Cannot assign classification higher than your clearance level.")
+        doc.classification_level = max(1, min(5, payload.classification_level))
+
     doc.status = payload.status
     if payload.status == "REJECTED":
         if not payload.reason:

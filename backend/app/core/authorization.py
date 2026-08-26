@@ -156,11 +156,10 @@ async def check_document_access(
             detail=f"Security Classification Error: Document classification is Level {doc_classification}, but your clearance is Level {user_clearance}."
         )
 
-    if is_case_owner or is_case_assigned:
+    if required_action in ["VIEW", "DOWNLOAD", "SEARCH"]:
         return True
 
-    # If document classification is unrestricted (Level 1) and user has VIEW permission
-    if doc_classification == 1 and user.role in ["Investigating Officer", "Senior Officer", "Prosecutor"]:
+    if is_case_owner or is_case_assigned:
         return True
 
     from app.core.audit import log_audit_event
@@ -176,7 +175,7 @@ async def check_document_access(
     await db.commit()
     raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
-        detail="You do not have permission to access this document. Request access from the document owner or an Admin."
+        detail="You do not have permission to edit this document. Request access from the document owner or an Admin."
     )
 
 
@@ -208,18 +207,6 @@ def get_authorized_document_filter(user: User):
         # Condition A: Explicit permission bypasses clearance check for VIEW
         Document.id.in_(explicit_perm_subq),
         
-        # Condition B: Meets clearance AND (owns case OR assigned to case)
-        and_(
-            func.coalesce(Document.classification_level, 1) <= user_clearance,
-            or_(
-                Case.owning_officer_id == user.id,
-                Document.case_id.in_(case_assigned_subq)
-            )
-        ),
-        
-        # Condition C: Classification is 1 AND user has one of the roles
-        and_(
-            func.coalesce(Document.classification_level, 1) == 1,
-            user.role in ["Investigating Officer", "Senior Officer", "Prosecutor"]
-        )
+        # Condition B: Meets clearance
+        func.coalesce(Document.classification_level, 1) <= user_clearance
     )

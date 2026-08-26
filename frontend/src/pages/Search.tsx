@@ -1,3 +1,4 @@
+import { API_BASE_URL } from "../config";
 import { useState, useEffect } from 'react';
 import { 
   Box, 
@@ -23,7 +24,8 @@ import {
   TableContainer,
   TableHead,
   TableRow,
-  Alert
+  Alert,
+  MenuItem
 } from '@mui/material';
 import { 
   SearchRounded, 
@@ -41,6 +43,9 @@ import ShareDocumentDialog from '../components/ShareDocumentDialog';
 
 export default function Search() {
   const [query, setQuery] = useState('');
+  const [classificationFilter, setClassificationFilter] = useState<number | ''>('');
+  const [typeFilter, setTypeFilter] = useState<string>('All Types');
+  const [hasSearched, setHasSearched] = useState(false);
   const [results, setResults] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [selectedDoc, setSelectedDoc] = useState<any | null>(null);
@@ -54,43 +59,68 @@ export default function Search() {
   
   const [auditLogs, setAuditLogs] = useState<any[]>([]);
   const [auditLoading, setAuditLoading] = useState(false);
-
+  
   const [integrityResult, setIntegrityResult] = useState<any | null>(null);
   const [verifyingIntegrity, setVerifyingIntegrity] = useState(false);
 
   const [file, setFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
 
-  const { token } = useAuth();
+  const { token, user } = useAuth();
+
+  const CLEARANCE_LABELS: Record<number, string> = {
+    1: 'L1 – Restricted', 2: 'L2 – Confidential', 3: 'L3 – Secret', 4: 'L4 – Top Secret', 5: 'L5 – Executive'
+  };
+  
+  const DOCUMENT_TYPES = [
+    "FIR", "Evidence Log", "Investigation Report", "Forensic Report",
+    "Witness Statement", "Charge Sheet", "Court Order", "Court Filing",
+    "Legal Notice", "Judgment", "Other"
+  ];
 
   useEffect(() => {
     const delayDebounceFn = setTimeout(async () => {
-      if (query.trim().length >= 2) {
+      const isQueryValid = query.trim().length >= 2;
+      const hasFilters = classificationFilter !== '' || typeFilter !== 'All Types';
+      
+      if (isQueryValid || hasFilters) {
         setLoading(true);
+        setHasSearched(true);
         try {
-          const res = await fetch(`http://${window.location.hostname}:8000/search/documents?query=${encodeURIComponent(query.trim())}`, {
+          const params = new URLSearchParams();
+          if (isQueryValid) params.append('query', query.trim());
+          if (classificationFilter !== '') params.append('classification_level', classificationFilter.toString());
+          if (typeFilter !== 'All Types') params.append('document_type', typeFilter);
+
+          const res = await fetch(`${API_BASE_URL}/search/documents?${params.toString()}`, {
             headers: { 'Authorization': `Bearer ${token}` }
           });
           if (res.ok) {
             setResults(await res.json());
+            setSearchError(null);
+          } else {
+            setSearchError(`Backend returned ${res.status}`);
           }
-        } catch (e) {
+        } catch (e: any) {
           console.error("Search error:", e);
+          setSearchError(e.message || "Failed to perform search");
         } finally {
           setLoading(false);
         }
       } else {
         setResults([]);
+        setHasSearched(false);
       }
     }, 400);
 
     return () => clearTimeout(delayDebounceFn);
-  }, [query, token]);
+  }, [query, classificationFilter, typeFilter, token]);
 
   const fetchVersions = async (docId: string) => {
     setVersionsLoading(true);
     try {
-      const res = await fetch(`http://${window.location.hostname}:8000/documents/${docId}/versions`, {
+      const res = await fetch(`${API_BASE_URL}/documents/${docId}/versions`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       if (res.ok) {
@@ -106,7 +136,7 @@ export default function Search() {
   const fetchAuditHistory = async (docId: string) => {
     setAuditLoading(true);
     try {
-      const res = await fetch(`http://${window.location.hostname}:8000/documents/${docId}/audit-history`, {
+      const res = await fetch(`${API_BASE_URL}/documents/${docId}/audit-history`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       if (res.ok) {
@@ -124,7 +154,7 @@ export default function Search() {
     setIntegrityResult(null);
     setFile(null);
     try {
-      const res = await fetch(`http://${window.location.hostname}:8000/documents/${docId}`, {
+      const res = await fetch(`${API_BASE_URL}/documents/${docId}`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       if (res.ok) {
@@ -144,7 +174,7 @@ export default function Search() {
     setVerifyingIntegrity(true);
     setIntegrityResult(null);
     try {
-      const res = await fetch(`http://${window.location.hostname}:8000/documents/${selectedDoc.id}/verify-integrity`, {
+      const res = await fetch(`${API_BASE_URL}/documents/${selectedDoc.id}/verify-integrity`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}` }
       });
@@ -168,7 +198,7 @@ export default function Search() {
     if (!selectedDoc) return;
     if (!window.confirm('Are you sure you want to restore this version? This will create a new current version from the selected past version.')) return;
     try {
-      const res = await fetch(`http://${window.location.hostname}:8000/documents/${selectedDoc.id}/versions/${versionId}/restore`, {
+      const res = await fetch(`${API_BASE_URL}/documents/${selectedDoc.id}/versions/${versionId}/restore`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}` }
       });
@@ -194,7 +224,7 @@ export default function Search() {
       const formData = new FormData();
       formData.append('file', file);
       
-      const res = await fetch(`http://${window.location.hostname}:8000/documents/${selectedDoc.id}/versions`, {
+      const res = await fetch(`${API_BASE_URL}/documents/${selectedDoc.id}/versions`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}` },
         body: formData
@@ -216,7 +246,7 @@ export default function Search() {
   };
 
   const handleDownload = (docId: string, title: string) => {
-    fetch(`http://${window.location.hostname}:8000/documents/${docId}/download`, {
+    fetch(`${API_BASE_URL}/documents/${docId}/download`, {
       headers: { 'Authorization': `Bearer ${token}` }
     })
     .then(res => {
@@ -241,7 +271,7 @@ export default function Search() {
       
       <TextField
         fullWidth
-        placeholder="Search for cases, FIRs, suspects, sections, or document text..."
+        placeholder="Search documents, case numbers, or extracted metadata (use commas to combine terms)..."
         value={query}
         onChange={(e) => setQuery(e.target.value)}
         sx={{
@@ -264,8 +294,38 @@ export default function Search() {
         }}
       />
 
+      <Box sx={{ display: 'flex', gap: 2, mt: 2 }}>
+        <TextField
+          select
+          size="small"
+          label="Classification"
+          value={classificationFilter}
+          onChange={(e) => setClassificationFilter(e.target.value as any)}
+          sx={{ minWidth: 200, bgcolor: 'background.paper' }}
+        >
+          <MenuItem value="">All Levels</MenuItem>
+          {[1, 2, 3, 4, 5].filter(l => l <= (user?.clearance_level || 1)).map(level => (
+            <MenuItem key={level} value={level}>{CLEARANCE_LABELS[level]}</MenuItem>
+          ))}
+        </TextField>
+        
+        <TextField
+          select
+          size="small"
+          label="Document Type"
+          value={typeFilter}
+          onChange={(e) => setTypeFilter(e.target.value)}
+          sx={{ minWidth: 200, bgcolor: 'background.paper' }}
+        >
+          <MenuItem value="All Types">All Types</MenuItem>
+          {DOCUMENT_TYPES.map(type => (
+            <MenuItem key={type} value={type}>{type}</MenuItem>
+          ))}
+        </TextField>
+      </Box>
+
       <Box sx={{ mt: 4 }}>
-        {query.length > 0 && query.length < 2 && (
+        {query.length > 0 && query.length < 2 && classificationFilter === '' && typeFilter === 'All Types' && (
           <Typography color="text.secondary" align="center">Type at least 2 characters to search</Typography>
         )}
         
@@ -323,8 +383,11 @@ export default function Search() {
             </List>
           </Card>
         )}
-        {query.trim().length >= 2 && results.length === 0 && !loading && (
-          <Typography color="text.secondary" align="center" sx={{ mt: 4 }}>No documents found matching "{query}"</Typography>
+        {hasSearched && results.length === 0 && !loading && !searchError && (
+          <Typography color="text.secondary" align="center" sx={{ mt: 4 }}>No documents found matching your criteria.</Typography>
+        )}
+        {searchError && (
+          <Alert severity="error" sx={{ mt: 4 }}>Search Failed: {searchError}</Alert>
         )}
       </Box>
 
@@ -347,21 +410,29 @@ export default function Search() {
               </Box>
 
               {/* AI Metadata */}
-              {selectedDoc.structured_data && Object.keys(selectedDoc.structured_data).length > 0 && (
+              {selectedDoc.structured_data && Object.keys(selectedDoc.structured_data).length > 0 && !selectedDoc.structured_data.error ? (
                 <Card sx={{ p: 2.5, bgcolor: 'background.default', border: '1px solid', borderColor: 'divider' }}>
                   <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1.5, color: 'primary.main', display: 'flex', alignItems: 'center', gap: 1 }}>
                     <AutoAwesomeRounded sx={{ fontSize: 18 }} /> AI-Extracted Structured Metadata
                   </Typography>
                   <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, gap: 1.5 }}>
-                    <Typography variant="body2"><strong>FIR / Case No:</strong> {selectedDoc.structured_data.fir_number || 'N/A'}</Typography>
-                    <Typography variant="body2"><strong>Incident Date:</strong> {selectedDoc.structured_data.incident_date || 'N/A'}</Typography>
-                    <Typography variant="body2"><strong>Police Station:</strong> {selectedDoc.structured_data.police_station || 'N/A'}</Typography>
-                    <Typography variant="body2"><strong>Complainant:</strong> {selectedDoc.structured_data.complainant || 'N/A'}</Typography>
-                    <Typography variant="body2"><strong>Accused:</strong> {selectedDoc.structured_data.accused || 'N/A'}</Typography>
-                    <Typography variant="body2">
-                      <strong>IPC Sections:</strong> {Array.isArray(selectedDoc.structured_data.ipc_sections) ? selectedDoc.structured_data.ipc_sections.join(', ') : selectedDoc.structured_data.ipc_sections || 'N/A'}
-                    </Typography>
+                    {Object.entries(selectedDoc.structured_data).map(([key, value]) => {
+                      if (key === 'document_type') return null;
+                      const formattedKey = key.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+                      const displayValue = Array.isArray(value) ? value.join(', ') : (value || 'N/A');
+                      return (
+                        <Typography key={key} variant="body2">
+                          <strong>{formattedKey}:</strong> {String(displayValue)}
+                        </Typography>
+                      );
+                    })}
                   </Box>
+                </Card>
+              ) : (
+                <Card sx={{ p: 2.5, bgcolor: 'background.default', border: '1px solid', borderColor: 'divider' }}>
+                  <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
+                    No structured metadata could be extracted from this document.
+                  </Typography>
                 </Card>
               )}
 

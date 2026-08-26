@@ -1,3 +1,4 @@
+import { API_BASE_URL } from "../config";
 import { useState, useEffect, useRef } from 'react';
 import { 
   Box, 
@@ -46,7 +47,7 @@ import {
   BlockRounded
 } from '@mui/icons-material';
 import { useAuth } from '../context/AuthContext';
-import { Link as RouterLink, useLocation } from 'react-router-dom';
+import { Link as RouterLink, useLocation, useSearchParams } from 'react-router-dom';
 import ShareDocumentDialog from '../components/ShareDocumentDialog';
 
 const CLEARANCE_COLORS: Record<number, 'default' | 'info' | 'warning' | 'error' | 'success'> = {
@@ -114,14 +115,17 @@ export default function Documents() {
   const [reviewerSearch, setReviewerSearch] = useState('');
   const [reviewers, setReviewers] = useState<any[]>([]);
   const [reviewSubmitMode, setReviewSubmitMode] = useState(false);
+  const [reviewClassificationLevel, setReviewClassificationLevel] = useState<number | null>(null);
 
-  const { token } = useAuth();
+  const { token, user } = useAuth();
   const pollIntervalRef = useRef<any>(null);
   const location = useLocation();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const deepLinkId = searchParams.get('id');
 
   const fetchCases = async () => {
     try {
-      const res = await fetch(`http://${window.location.hostname}:8000/cases`, {
+      const res = await fetch(`${API_BASE_URL}/cases`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       if (res.ok) {
@@ -140,7 +144,7 @@ export default function Documents() {
     if (!selectedDoc || !versionToSign || !signPassword) return;
     setSigning(true);
     try {
-      const res = await fetch(`http://${window.location.hostname}:8000/documents/${selectedDoc.id}/versions/${versionToSign}/sign`, {
+      const res = await fetch(`${API_BASE_URL}/documents/${selectedDoc.id}/versions/${versionToSign}/sign`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({ password: signPassword })
@@ -164,7 +168,7 @@ export default function Documents() {
   const handleVerifySignature = async (docId: string, versionId: string) => {
     setSigDetails(null);
     try {
-      const res = await fetch(`http://${window.location.hostname}:8000/documents/${docId}/versions/${versionId}/verify-signature`, { headers: { 'Authorization': `Bearer ${token}` } });
+      const res = await fetch(`${API_BASE_URL}/documents/${docId}/versions/${versionId}/verify-signature`, { headers: { 'Authorization': `Bearer ${token}` } });
       const data = await res.json();
       setSigDetails(data);
       setOpenSigModal(true);
@@ -177,7 +181,7 @@ export default function Documents() {
   const fetchDocuments = async () => {
     setLoading(true);
     try {
-      const res = await fetch(`http://${window.location.hostname}:8000/documents`, {
+      const res = await fetch(`${API_BASE_URL}/documents`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       if (res.ok) {
@@ -199,19 +203,18 @@ export default function Documents() {
   }, [token]);
 
   useEffect(() => {
-    const params = new URLSearchParams(location.search);
-    const docId = params.get('id');
-    if (docId && documents.length > 0) {
-      // Check if it's not already opened
-      if (!selectedDoc || selectedDoc.id !== docId) {
-        handleViewDetails(docId);
+    if (deepLinkId && documents.length > 0) {
+      if (!selectedDoc || selectedDoc.id !== deepLinkId) {
+        handleViewDetails(deepLinkId);
+        searchParams.delete('id');
+        setSearchParams(searchParams, { replace: true });
       }
     }
-  }, [location.search, documents]);
+  }, [deepLinkId, documents, searchParams, setSearchParams, selectedDoc]);
 
   useEffect(() => {
     if (reviewerSearch.length > 1) {
-      fetch(`http://${window.location.hostname}:8000/auth/search?q=${reviewerSearch}`, {
+      fetch(`${API_BASE_URL}/auth/search?q=${reviewerSearch}`, {
         headers: { 'Authorization': `Bearer ${token}` }
       })
       .then(res => res.json())
@@ -226,7 +229,7 @@ export default function Documents() {
     if (hasProcessing) {
       pollIntervalRef.current = setInterval(async () => {
         try {
-          const res = await fetch(`http://${window.location.hostname}:8000/documents`, {
+          const res = await fetch(`${API_BASE_URL}/documents`, {
             headers: { 'Authorization': `Bearer ${token}` }
           });
           if (res.ok) {
@@ -252,7 +255,7 @@ export default function Documents() {
     if (!newCaseNumber) return;
     setCreatingCase(true);
     try {
-      const res = await fetch(`http://${window.location.hostname}:8000/cases`, {
+      const res = await fetch(`${API_BASE_URL}/cases`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -285,7 +288,7 @@ export default function Documents() {
     setUpdatingCaseStatus(true);
     setCaseStatusError('');
     try {
-      const res = await fetch(`http://${window.location.hostname}:8000/cases/${caseId}/status`, {
+      const res = await fetch(`${API_BASE_URL}/cases/${caseId}/status`, {
         method: 'PATCH',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -327,7 +330,7 @@ export default function Documents() {
         formData.append('reviewer_id', reviewerId);
       }
       
-      const res = await fetch(`http://${window.location.hostname}:8000/documents/upload`, {
+      const res = await fetch(`${API_BASE_URL}/documents/upload`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}` },
         body: formData
@@ -358,7 +361,7 @@ export default function Documents() {
     setIntegrityVerified(false);
     setIntegrityError('');
     try {
-      const res = await fetch(`http://${window.location.hostname}:8000/documents/${docId}`, {
+      const res = await fetch(`${API_BASE_URL}/documents/${docId}`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       if (res.ok) {
@@ -376,7 +379,7 @@ export default function Documents() {
   const fetchVersions = async (docId: string) => {
     setVersionsLoading(true);
     try {
-      const res = await fetch(`http://${window.location.hostname}:8000/documents/${docId}/versions`, {
+      const res = await fetch(`${API_BASE_URL}/documents/${docId}/versions`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       if (res.ok) {
@@ -392,7 +395,7 @@ export default function Documents() {
   const fetchAuditHistory = async (docId: string) => {
     setAuditLoading(true);
     try {
-      const res = await fetch(`http://${window.location.hostname}:8000/documents/${docId}/audit-history`, {
+      const res = await fetch(`${API_BASE_URL}/documents/${docId}/audit-history`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       if (res.ok) {
@@ -405,16 +408,16 @@ export default function Documents() {
     }
   };
 
-  const handleUpdateStatus = async (status: string, reason?: string, reviewer_id?: string) => {
+  const handleUpdateStatus = async (status: string, reason?: string, reviewer_id?: string, classification_level?: number) => {
     if (!selectedDoc) return;
     try {
-      const res = await fetch(`http://${window.location.hostname}:8000/documents/${selectedDoc.id}/status`, {
+      const res = await fetch(`${API_BASE_URL}/documents/${selectedDoc.id}/status`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify({ status, reason, reviewer_id })
+        body: JSON.stringify({ status, reason, reviewer_id, classification_level })
       });
       if (res.ok) {
         setReviewSubmitMode(false);
@@ -434,13 +437,12 @@ export default function Documents() {
     setIntegrityError('');
     setIntegrityVerified(false);
     try {
-      const res = await fetch(`http://${window.location.hostname}:8000/documents/${selectedDoc.id}/verify-integrity`, {
+      const res = await fetch(`${API_BASE_URL}/documents/${selectedDoc.id}/verify-integrity`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}` }
       });
       if (res.ok) {
         setIntegrityVerified(true);
-        fetchDocuments();
         fetchVersions(selectedDoc.id);
       } else {
         const err = await res.json();
@@ -455,7 +457,7 @@ export default function Documents() {
     if (!selectedDoc) return;
     if (!window.confirm('Are you sure you want to restore this version? This will create a new current version from the selected past version.')) return;
     try {
-      const res = await fetch(`http://${window.location.hostname}:8000/documents/${selectedDoc.id}/versions/${versionId}/restore`, {
+      const res = await fetch(`${API_BASE_URL}/documents/${selectedDoc.id}/versions/${versionId}/restore`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}` }
       });
@@ -474,7 +476,7 @@ export default function Documents() {
 
   const handleRetryProcessing = async (docId: string) => {
     try {
-      const res = await fetch(`http://${window.location.hostname}:8000/documents/${docId}/retry`, {
+      const res = await fetch(`${API_BASE_URL}/documents/${docId}/retry`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}` }
       });
@@ -500,7 +502,7 @@ export default function Documents() {
       const formData = new FormData();
       formData.append('file', file);
       
-      const res = await fetch(`http://${window.location.hostname}:8000/documents/${selectedDoc.id}/versions`, {
+      const res = await fetch(`${API_BASE_URL}/documents/${selectedDoc.id}/versions`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}` },
         body: formData
@@ -522,7 +524,7 @@ export default function Documents() {
   };
 
   const handleDownload = (docId: string, title: string) => {
-    fetch(`http://${window.location.hostname}:8000/documents/${docId}/download`, {
+    fetch(`${API_BASE_URL}/documents/${docId}/download`, {
       headers: { 'Authorization': `Bearer ${token}` }
     })
     .then(res => {
@@ -771,11 +773,13 @@ export default function Documents() {
               onChange={(e) => setClassificationLevel(Number(e.target.value))}
               helperText="Hierarchy clearance level required to access this document"
             >
-              <MenuItem value={1}>Level 1: Restricted (All Officers)</MenuItem>
-              <MenuItem value={2}>Level 2: Confidential (Sub-Inspectors & above)</MenuItem>
-              <MenuItem value={3}>Level 3: Secret (Investigating Officers & above)</MenuItem>
-              <MenuItem value={4}>Level 4: Top Secret (Senior Officers / SP)</MenuItem>
-              <MenuItem value={5}>Level 5: Executive / Admin</MenuItem>
+              {[1, 2, 3, 4, 5]
+                .filter(level => level <= (user?.clearance_level || 1))
+                .map(level => (
+                  <MenuItem key={level} value={level}>
+                    {CLEARANCE_LABELS[level]}
+                  </MenuItem>
+                ))}
             </TextField>
 
             <TextField 
@@ -855,13 +859,13 @@ export default function Documents() {
       </Dialog>
 
       {/* Document Details & OCR / Metadata Modal */}
-      <Dialog open={Boolean(selectedDoc)} onClose={() => { setSelectedDoc(null); setReviewSubmitMode(false); setIntegrityVerified(false); setIntegrityError(''); }} maxWidth="md" fullWidth>
+      <Dialog open={Boolean(selectedDoc)} onClose={() => { setSelectedDoc(null); setReviewSubmitMode(false); setIntegrityVerified(false); setIntegrityError(''); setReviewClassificationLevel(null); }} maxWidth="md" fullWidth>
         <DialogTitle sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
             <AutoAwesomeRounded color="primary" />
             <Typography variant="h6" sx={{ fontWeight: 700 }}>{selectedDoc?.title}</Typography>
           </Box>
-          <IconButton onClick={() => { setSelectedDoc(null); setReviewSubmitMode(false); setIntegrityVerified(false); setIntegrityError(''); }} size="small"><CloseRounded /></IconButton>
+          <IconButton onClick={() => { setSelectedDoc(null); setReviewSubmitMode(false); setIntegrityVerified(false); setIntegrityError(''); setReviewClassificationLevel(null); }} size="small"><CloseRounded /></IconButton>
         </DialogTitle>
         <DialogContent dividers>
           {selectedDoc && (
@@ -908,9 +912,21 @@ export default function Documents() {
                   <Button variant="contained" color="secondary" size="small" onClick={() => handleUpdateStatus('UNDER_REVIEW')}>Start Review</Button>
                 )}
                 {selectedDoc.status === 'UNDER_REVIEW' && (
-                  <Box sx={{ display: 'flex', gap: 1 }}>
+                  <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'wrap' }}>
                     <Button variant="outlined" size="small" color="info" onClick={handleVerifyIntegrity} startIcon={<ShieldRounded />}>Verify Integrity</Button>
-                    <Button variant="contained" size="small" color="success" onClick={() => handleUpdateStatus('APPROVED')}>Verify / Mark as Reviewed</Button>
+                    <TextField
+                      select
+                      size="small"
+                      label="Final Classification"
+                      value={reviewClassificationLevel || selectedDoc.classification_level}
+                      onChange={(e) => setReviewClassificationLevel(Number(e.target.value))}
+                      sx={{ width: 160 }}
+                    >
+                      {[1, 2, 3, 4, 5].filter(level => level <= (user?.clearance_level || 1)).map(level => (
+                        <MenuItem key={level} value={level}>{CLEARANCE_LABELS[level]}</MenuItem>
+                      ))}
+                    </TextField>
+                    <Button variant="contained" size="small" color="success" onClick={() => handleUpdateStatus('APPROVED', undefined, undefined, reviewClassificationLevel || selectedDoc.classification_level)}>Verify / Mark as Reviewed</Button>
                     <Button variant="outlined" size="small" color="error" onClick={() => {
                         const reason = window.prompt("Enter rejection reason:");
                         if (reason) handleUpdateStatus('REJECTED', reason);
@@ -937,29 +953,43 @@ export default function Documents() {
               )}
 
               {/* Structured Metadata Box */}
-              {selectedDoc.structured_data && Object.keys(selectedDoc.structured_data).length > 0 && (
+              {selectedDoc.structured_data && Object.keys(selectedDoc.structured_data).length > 0 && !selectedDoc.structured_data.error ? (
                 <Card sx={{ p: 2.5, bgcolor: 'background.default', border: '1px solid', borderColor: 'divider' }}>
                   <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1.5, color: 'primary.main', display: 'flex', alignItems: 'center', gap: 1 }}>
                     <AutoAwesomeRounded sx={{ fontSize: 18 }} /> AI-Extracted Structured Metadata
                   </Typography>
                   <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, gap: 1.5 }}>
-                    <Typography variant="body2"><strong>FIR / Ref No:</strong> {selectedDoc.structured_data.fir_number || 'N/A'}</Typography>
-                    <Typography variant="body2"><strong>Incident Date:</strong> {selectedDoc.structured_data.incident_date || 'N/A'}</Typography>
-                    <Typography variant="body2"><strong>Police Station:</strong> {selectedDoc.structured_data.police_station || 'N/A'}</Typography>
-                    <Typography variant="body2"><strong>Complainant:</strong> {selectedDoc.structured_data.complainant || 'N/A'}</Typography>
-                    <Typography variant="body2"><strong>Accused:</strong> {selectedDoc.structured_data.accused || 'N/A'}</Typography>
-                    <Typography variant="body2">
-                      <strong>IPC / Legal Sections:</strong> {Array.isArray(selectedDoc.structured_data.ipc_sections) ? selectedDoc.structured_data.ipc_sections.join(', ') : selectedDoc.structured_data.ipc_sections || 'N/A'}
-                    </Typography>
+                    {Object.entries(selectedDoc.structured_data).map(([key, value]) => {
+                      if (key === 'document_type') return null;
+                      const formattedKey = key.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+                      const displayValue = Array.isArray(value) ? value.join(', ') : (value || 'N/A');
+                      return (
+                        <Typography key={key} variant="body2">
+                          <strong>{formattedKey}:</strong> {String(displayValue)}
+                        </Typography>
+                      );
+                    })}
                   </Box>
+                </Card>
+              ) : (
+                <Card sx={{ p: 2.5, bgcolor: 'rgba(255, 86, 48, 0.08)', border: '1px solid', borderColor: 'error.main' }}>
+                  <Typography variant="body2" color="error.main" sx={{ fontWeight: 600 }}>
+                    {selectedDoc.structured_data?.message || 'No structured metadata could be extracted from this document.'}
+                  </Typography>
                 </Card>
               )}
 
               {/* Extracted Raw OCR Text Box */}
               <Box>
                 <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>Extracted Document Text</Typography>
-                <Box sx={{ p: 2, bgcolor: 'background.default', borderRadius: 1.5, maxHeight: 260, overflowY: 'auto', fontFamily: 'monospace', fontSize: 13, whiteSpace: 'pre-wrap', border: '1px solid', borderColor: 'divider' }}>
-                  {selectedDoc.raw_ocr_text || 'No text extracted.'}
+                <Box sx={{ p: 2, bgcolor: selectedDoc.raw_ocr_text?.startsWith('EXTRACTION_FAILED') ? 'rgba(255, 86, 48, 0.08)' : 'background.default', borderRadius: 1.5, maxHeight: 260, overflowY: 'auto', fontFamily: 'monospace', fontSize: 13, whiteSpace: 'pre-wrap', border: '1px solid', borderColor: selectedDoc.raw_ocr_text?.startsWith('EXTRACTION_FAILED') ? 'error.main' : 'divider' }}>
+                  {selectedDoc.raw_ocr_text?.startsWith('EXTRACTION_FAILED') ? (
+                    <Typography color="error.main" sx={{ fontFamily: 'monospace', fontSize: 13 }}>
+                      Text extraction failed: {selectedDoc.raw_ocr_text.replace('EXTRACTION_FAILED: ', '')}
+                    </Typography>
+                  ) : (
+                    selectedDoc.raw_ocr_text || 'No text extracted.'
+                  )}
                 </Box>
               </Box>
 
