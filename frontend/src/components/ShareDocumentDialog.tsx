@@ -274,7 +274,7 @@ export default function ShareDocumentDialog({
         <Box sx={{ display: 'flex', alignItems: 'flex-end', mb: 2 }}>
           <SearchRounded sx={{ color: 'action.active', mr: 1, my: 0.5 }} />
           <FormControl fullWidth>
-            <input 
+            <input
               type="text"
               placeholder="Search users by email, name, or user ID..."
               value={searchQuery}

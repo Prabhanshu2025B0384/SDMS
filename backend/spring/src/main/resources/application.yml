@@ -1,0 +1,42 @@
+spring:
+  application:
+    name: securedms
+  datasource:
+    url: ${DATABASE_URL:jdbc:postgresql://aws-0-ap-southeast-1.pooler.supabase.com:5432/postgres}
+    username: ${DB_USER:postgres.vshsmnrzeusimlcemzhc}
+    password: ${DB_PASSWORD:W2072abcW20}
+    driver-class-name: org.postgresql.Driver
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: false
+    properties:
+      hibernate:
+        format_sql: true
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+
+server:
+  port: ${PORT:8080}
+  error:
+    include-message: always
+
+jwt:
+  secret: ${JWT_SECRET:verysecretkeythatisatleast256bitslongforhs256algorithm1234567890}
+  expiration: ${JWT_EXPIRATION_MS:86400000} # 24 hours
+
+cors:
+  allowed-origins: ${CORS_ORIGINS:http://localhost:5173,http://127.0.0.1:5173}
+
+storage:
+  supabase:
+    url: ${SUPABASE_URL:https://vshsmnrzeusimlcemzhc.supabase.co}
+    key: ${SUPABASE_SERVICE_KEY:sb_secret_ue3ecj3c3P-VroRAb0aL2w_pYcxYBqX}
+    bucket: ${SUPABASE_STORAGE_BUCKET:SDMS}
+
+webhook:
+  secret: ${WEBHOOK_SECRET:verysecureinternalwebhooksecret123}

@@ -1,15 +1,15 @@
 import { API_BASE_URL } from "../config";
 import { useState, useEffect, useRef } from 'react';
-import { 
-  Box, 
-  Button, 
-  Typography, 
-  Table, 
-  TableBody, 
-  TableCell, 
-  TableContainer, 
-  TableHead, 
-  TableRow, 
+import {
+  Box,
+  Button,
+  Typography,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
   Dialog,
   DialogTitle,
   DialogContent,
@@ -30,12 +30,12 @@ import {
   FormControlLabel,
   FormControl
 } from '@mui/material';
-import { 
-  AddRounded, 
-  DescriptionRounded, 
-  DownloadRounded, 
-  VisibilityRounded, 
-  CloudUploadRounded, 
+import {
+  AddRounded,
+  DescriptionRounded,
+  DownloadRounded,
+  VisibilityRounded,
+  CloudUploadRounded,
   FolderRounded,
   CloseRounded,
   RefreshRounded,
@@ -47,7 +47,7 @@ import {
   BlockRounded
 } from '@mui/icons-material';
 import { useAuth } from '../context/AuthContext';
-import { Link as RouterLink, useLocation, useSearchParams } from 'react-router-dom';
+import { Link as RouterLink, useSearchParams } from 'react-router-dom';
 import ShareDocumentDialog from '../components/ShareDocumentDialog';
 
 const CLEARANCE_COLORS: Record<number, 'default' | 'info' | 'warning' | 'error' | 'success'> = {
@@ -74,38 +74,38 @@ export default function Documents() {
   const [caseStatusError, setCaseStatusError] = useState('');
   const [newCaseStatus, setNewCaseStatus] = useState('');
   const [updatingCaseStatus, setUpdatingCaseStatus] = useState(false);
-  
+
   const [file, setFile] = useState<File | null>(null);
   const [title, setTitle] = useState('');
   const [caseId, setCaseId] = useState('');
   const [docType, setDocType] = useState('FIR');
   const [classificationLevel, setClassificationLevel] = useState(1);
   const [uploading, setUploading] = useState(false);
-  
+
   // Digital Signatures
   const [signPassword, setSignPassword] = useState('');
   const [openSignModal, setOpenSignModal] = useState(false);
   const [versionToSign, setVersionToSign] = useState<string | null>(null);
   const [signing, setSigning] = useState(false);
-  
+
   const [sigDetails, setSigDetails] = useState<any>(null);
   const [openSigModal, setOpenSigModal] = useState(false);
   const [loading, setLoading] = useState(false);
   const [uploadError, setUploadError] = useState('');
-  
+
   const [selectedDoc, setSelectedDoc] = useState<any | null>(null);
   const [viewLoading, setViewLoading] = useState(false);
-  
+
   const [integrityVerified, setIntegrityVerified] = useState(false);
   const [integrityError, setIntegrityError] = useState('');
-  
+
   // Share dialog state
   const [shareDoc, setShareDoc] = useState<{ id: string; title: string; classification_level: number } | null>(null);
   const [shareOpen, setShareOpen] = useState(false);
 
   const [versions, setVersions] = useState<any[]>([]);
   const [versionsLoading, setVersionsLoading] = useState(false);
-  
+
   const [auditLogs, setAuditLogs] = useState<any[]>([]);
   const [auditLoading, setAuditLoading] = useState(false);
 
@@ -119,7 +119,6 @@ export default function Documents() {
 
   const { token, user } = useAuth();
   const pollIntervalRef = useRef<any>(null);
-  const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
   const deepLinkId = searchParams.get('id');
 
@@ -217,9 +216,13 @@ export default function Documents() {
       fetch(`${API_BASE_URL}/auth/search?q=${reviewerSearch}`, {
         headers: { 'Authorization': `Bearer ${token}` }
       })
-      .then(res => res.json())
-      .then(data => setReviewers(data))
-      .catch(console.error);
+        .then(async res => {
+          if (!res.ok) return [];
+          const data = await res.json();
+          return Array.isArray(data) ? data : [];
+        })
+        .then(data => setReviewers(data))
+        .catch(console.error);
     }
   }, [reviewerSearch, token]);
 
@@ -318,7 +321,7 @@ export default function Documents() {
     }
     setUploading(true);
     setUploadError('');
-    
+
     try {
       const formData = new FormData();
       formData.append('file', file);
@@ -329,13 +332,13 @@ export default function Documents() {
       if (submitForApproval && reviewerId) {
         formData.append('reviewer_id', reviewerId);
       }
-      
+
       const res = await fetch(`${API_BASE_URL}/documents/upload`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}` },
         body: formData
       });
-      
+
       if (res.ok) {
         setOpen(false);
         setFile(null);
@@ -501,13 +504,13 @@ export default function Documents() {
     try {
       const formData = new FormData();
       formData.append('file', file);
-      
+
       const res = await fetch(`${API_BASE_URL}/documents/${selectedDoc.id}/versions`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}` },
         body: formData
       });
-      
+
       if (res.ok) {
         setFile(null);
         fetchDocuments();
@@ -527,20 +530,20 @@ export default function Documents() {
     fetch(`${API_BASE_URL}/documents/${docId}/download`, {
       headers: { 'Authorization': `Bearer ${token}` }
     })
-    .then(res => {
-      if (!res.ok) throw new Error('Download failed');
-      return res.blob();
-    })
-    .then(blob => {
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${title.replace(/\s+/g, '_')}.pdf`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-    })
-    .catch(err => alert("Download failed: " + err.message));
+      .then(res => {
+        if (!res.ok) throw new Error('Download failed');
+        return res.blob();
+      })
+      .then(blob => {
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${title.replace(/\s+/g, '_')}.pdf`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+      })
+      .catch(err => alert("Download failed: " + err.message));
   };
 
   const getCaseDisplay = (id: string) => {
@@ -563,16 +566,16 @@ export default function Documents() {
           </Breadcrumbs>
         </Box>
         <Stack direction="row" spacing={1.5}>
-          <Button 
-            variant="outlined" 
-            startIcon={<RefreshRounded />} 
+          <Button
+            variant="outlined"
+            startIcon={<RefreshRounded />}
             onClick={fetchDocuments}
             disabled={loading}
           >
             Refresh
           </Button>
-          <Button 
-            variant="contained" 
+          <Button
+            variant="contained"
             startIcon={<AddRounded />}
             onClick={() => {
               setUploadError('');
@@ -629,10 +632,10 @@ export default function Documents() {
                     <Chip icon={<FolderRounded sx={{ fontSize: '16px !important' }} />} label={getCaseDisplay(doc.case_id)} size="small" variant="outlined" />
                   </TableCell>
                   <TableCell>
-                    <Chip 
-                      label={doc.status === 'READY' ? 'READY / EXTRACTED' : doc.status} 
-                      size="small" 
-                      color={doc.status === 'READY' ? 'success' : doc.status === 'PROCESSING' ? 'warning' : doc.status === 'PROCESSING_FAILED' ? 'error' : 'info'} 
+                    <Chip
+                      label={doc.status === 'READY' ? 'READY / EXTRACTED' : doc.status}
+                      size="small"
+                      color={doc.status === 'READY' ? 'success' : doc.status === 'PROCESSING' ? 'warning' : doc.status === 'PROCESSING_FAILED' ? 'error' : 'info'}
                       sx={{ fontWeight: 700 }}
                     />
                   </TableCell>
@@ -687,9 +690,9 @@ export default function Documents() {
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5, pt: 1 }}>
             {uploadError && <Alert severity="error">{uploadError}</Alert>}
 
-            <Box 
-              sx={{ 
-                border: '2px dashed', 
+            <Box
+              sx={{
+                border: '2px dashed',
                 borderColor: file ? 'primary.main' : 'divider',
                 borderRadius: 2,
                 p: 4,
@@ -701,10 +704,10 @@ export default function Documents() {
               }}
               onClick={() => document.getElementById('file-upload')?.click()}
             >
-              <input 
-                type="file" 
-                id="file-upload" 
-                hidden 
+              <input
+                type="file"
+                id="file-upload"
+                hidden
                 accept="application/pdf"
                 onChange={(e) => {
                   const selected = e.target.files?.[0] || null;
@@ -720,11 +723,11 @@ export default function Documents() {
             </Box>
 
             <Box sx={{ display: 'flex', gap: 1, alignItems: 'flex-start' }}>
-              <TextField 
-                select 
-                label="Assign to Case" 
-                fullWidth 
-                value={caseId} 
+              <TextField
+                select
+                label="Assign to Case"
+                fullWidth
+                value={caseId}
                 onChange={(e) => setCaseId(e.target.value)}
                 helperText="Select the case file this document belongs to"
               >
@@ -734,15 +737,15 @@ export default function Documents() {
                   </MenuItem>
                 ))}
               </TextField>
-              <Button 
-                variant="outlined" 
+              <Button
+                variant="outlined"
                 sx={{ height: 54, whiteSpace: 'nowrap' }}
                 onClick={() => setOpenCreateCase(true)}
               >
                 + New Case
               </Button>
-              <Button 
-                variant="outlined" 
+              <Button
+                variant="outlined"
                 color="secondary"
                 sx={{ height: 54, whiteSpace: 'nowrap' }}
                 onClick={() => {
@@ -756,20 +759,20 @@ export default function Documents() {
               </Button>
             </Box>
 
-            <TextField 
-              label="Document Title" 
-              fullWidth 
-              value={title} 
-              onChange={(e) => setTitle(e.target.value)} 
+            <TextField
+              label="Document Title"
+              fullWidth
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
               placeholder="e.g. First Information Report 2026"
               required
             />
 
-            <TextField 
+            <TextField
               select
-              label="Security Classification Level" 
-              fullWidth 
-              value={classificationLevel} 
+              label="Security Classification Level"
+              fullWidth
+              value={classificationLevel}
               onChange={(e) => setClassificationLevel(Number(e.target.value))}
               helperText="Hierarchy clearance level required to access this document"
             >
@@ -782,11 +785,11 @@ export default function Documents() {
                 ))}
             </TextField>
 
-            <TextField 
+            <TextField
               select
-              label="Document Type" 
-              fullWidth 
-              value={docType} 
+              label="Document Type"
+              fullWidth
+              value={docType}
               onChange={(e) => setDocType(e.target.value)}
             >
               <MenuItem value="FIR">FIR (First Information Report)</MenuItem>
@@ -834,18 +837,18 @@ export default function Documents() {
         <DialogTitle sx={{ fontWeight: 700 }}>Create New Case</DialogTitle>
         <DialogContent dividers>
           <Stack spacing={2.5} sx={{ pt: 1 }}>
-            <TextField 
-              label="Case Number" 
-              fullWidth 
-              value={newCaseNumber} 
+            <TextField
+              label="Case Number"
+              fullWidth
+              value={newCaseNumber}
               onChange={(e) => setNewCaseNumber(e.target.value)}
               placeholder="e.g. CR-2026-089"
               autoFocus
             />
-            <TextField 
-              label="Jurisdiction / Unit" 
-              fullWidth 
-              value={newCaseJurisdiction} 
+            <TextField
+              label="Jurisdiction / Unit"
+              fullWidth
+              value={newCaseJurisdiction}
               onChange={(e) => setNewCaseJurisdiction(e.target.value)}
             />
           </Stack>
@@ -928,8 +931,8 @@ export default function Documents() {
                     </TextField>
                     <Button variant="contained" size="small" color="success" onClick={() => handleUpdateStatus('APPROVED', undefined, undefined, reviewClassificationLevel || selectedDoc.classification_level)}>Verify / Mark as Reviewed</Button>
                     <Button variant="outlined" size="small" color="error" onClick={() => {
-                        const reason = window.prompt("Enter rejection reason:");
-                        if (reason) handleUpdateStatus('REJECTED', reason);
+                      const reason = window.prompt("Enter rejection reason:");
+                      if (reason) handleUpdateStatus('REJECTED', reason);
                     }}>Reject</Button>
                   </Box>
                 )}
@@ -937,12 +940,12 @@ export default function Documents() {
                   <Button variant="contained" color="warning" size="small" onClick={() => handleUpdateStatus('LOCKED')}>Lock Document</Button>
                 )}
                 {selectedDoc.status !== 'UNDER_REVIEW' && (
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                  <Button variant="outlined" size="small" color="info" onClick={handleVerifyIntegrity} startIcon={<ShieldRounded />}>Verify Integrity</Button>
-                  {integrityVerified && (
-                    <Chip icon={<CheckCircleRounded sx={{ fontSize: '16px !important' }} />} label="Integrity Verified" color="success" size="small" sx={{ fontWeight: 700 }} />
-                  )}
-                </Box>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <Button variant="outlined" size="small" color="info" onClick={handleVerifyIntegrity} startIcon={<ShieldRounded />}>Verify Integrity</Button>
+                    {integrityVerified && (
+                      <Chip icon={<CheckCircleRounded sx={{ fontSize: '16px !important' }} />} label="Integrity Verified" color="success" size="small" sx={{ fontWeight: 700 }} />
+                    )}
+                  </Box>
                 )}
               </Box>
 
@@ -1040,14 +1043,14 @@ export default function Documents() {
                     </Table>
                   </TableContainer>
                 )}
-                
+
                 {selectedDoc.status !== 'LOCKED' && selectedDoc.status !== 'PROCESSING' && (
-                   <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
-                     <input type="file" accept="application/pdf" onChange={(e) => setFile(e.target.files?.[0] || null)} />
-                     <Button size="small" variant="contained" onClick={handleUploadNewVersion} disabled={!file || uploading}>
-                       {uploading ? <CircularProgress size={20} /> : 'Upload New Version'}
-                     </Button>
-                   </Box>
+                  <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+                    <input type="file" accept="application/pdf" onChange={(e) => setFile(e.target.files?.[0] || null)} />
+                    <Button size="small" variant="contained" onClick={handleUploadNewVersion} disabled={!file || uploading}>
+                      {uploading ? <CircularProgress size={20} /> : 'Upload New Version'}
+                    </Button>
+                  </Box>
                 )}
               </Box>
 
@@ -1114,7 +1117,7 @@ export default function Documents() {
           <Typography variant="body2" sx={{ mb: 3 }}>
             Current Status: <strong>{cases.find(c => c.id === caseId)?.status || 'CREATED'}</strong>
           </Typography>
-          
+
           <TextField
             select
             label="New Status"
@@ -1142,9 +1145,9 @@ export default function Documents() {
         </DialogContent>
         <DialogActions sx={{ px: 3, pb: 3 }}>
           <Button onClick={() => setOpenCaseStatus(false)} color="inherit">Cancel</Button>
-          <Button 
-            onClick={handleUpdateCaseStatus} 
-            variant="contained" 
+          <Button
+            onClick={handleUpdateCaseStatus}
+            variant="contained"
             color="primary"
             disabled={!newCaseStatus || updatingCaseStatus}
           >

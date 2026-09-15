@@ -9,7 +9,7 @@ if (import.meta.env.PROD) {
 } else {
   // Local development fallback
   if (!apiUrl) {
-    apiUrl = "http://localhost:8000";
+    apiUrl = "http://localhost:8080";
   }
 }
 

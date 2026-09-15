@@ -1,0 +1,64 @@
+services:
+  - type: web
+    name: spring-backend
+    env: docker
+    dockerfilePath: ./backend/spring/Dockerfile
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: dms-postgres
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: pserv
+          name: dms-redis
+          property: connectionString
+      - key: REDIS_HOST
+        fromService:
+          type: pserv
+          name: dms-redis
+          property: host
+      - key: REDIS_PORT
+        fromService:
+          type: pserv
+          name: dms-redis
+          property: port
+      - key: JWT_SECRET
+        generateValue: true
+      - key: WEBHOOK_SECRET
+        generateValue: true
+
+  - type: worker
+    name: python-celery-worker
+    env: python
+    buildCommand: "cd backend/python-worker && pip install -r requirements.txt"
+    startCommand: "cd backend/python-worker && celery -A celery_app worker --loglevel=info"
+    envVars:
+      - key: REDIS_URL
+        fromService:
+          type: pserv
+          name: dms-redis
+          property: connectionString
+      - key: API_BASE_URL
+        value: "https://spring-backend.onrender.com"
+      - key: WEBHOOK_SECRET
+        fromService:
+          type: web
+          name: spring-backend
+          property: WEBHOOK_SECRET
+      - key: GEMINI_API_KEY
+        sync: false
+
+  - type: pserv
+    name: dms-redis
+    env: docker
+    image: redis:6-alpine
+    startCommand: "redis-server --requirepass $REDIS_PASSWORD"
+    envVars:
+      - key: REDIS_PASSWORD
+        generateValue: true
+
+databases:
+  - name: dms-postgres
+    databaseName: securedms
+    user: dmsuser

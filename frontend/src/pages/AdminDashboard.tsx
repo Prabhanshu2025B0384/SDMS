@@ -352,7 +352,7 @@ export default function AdminDashboard() {
                       <TableCell>
                         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
                           <Avatar sx={{ width: 32, height: 32, fontSize: 12, bgcolor: 'primary.main' }}>
-                            {u.email?.slice(0, 2).toUpperCase()}
+                            {(u.email || 'U').slice(0, 2).toUpperCase()}
                           </Avatar>
                           <Typography variant="body2" sx={{ fontWeight: 600 }}>{u.email}</Typography>
                         </Box>

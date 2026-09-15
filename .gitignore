@@ -4,13 +4,19 @@ node_modules/
 frontend/dist/
 **/dist/
 
-backend/venv/
+backend/python-worker/venv/
 **/venv/
+
+backend/spring/target/
+**/target/
 
 __pycache__/
 **/__pycache__/
 
 *.pyc
+
+logs/
+.runtime/
 
 .env
 .env.*

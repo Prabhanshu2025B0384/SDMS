@@ -3,7 +3,7 @@ import glob
 
 # 1. Create config.ts
 with open("src/config.ts", "w") as f:
-    f.write('export const API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";\n')
+    f.write('export const API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8080";\n')
 
 # 2. Update files
 files_to_update = [
@@ -19,7 +19,7 @@ files_to_update = [
     "src/pages/AdminDashboard.tsx"
 ]
 
-target_str = "http://${window.location.hostname}:8000"
+target_str = "http://${window.location.hostname}:8080"
 
 for filepath in files_to_update:
     if os.path.exists(filepath):

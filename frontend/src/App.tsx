@@ -97,7 +97,7 @@ function Sidebar({ mobileOpen, onClose, onProfileClick }: { mobileOpen: boolean;
         >
           <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
             <Avatar sx={{ width: 40, height: 40, mr: 2, bgcolor: 'primary.main', fontSize: 14, fontWeight: 700 }}>
-              {user?.email?.slice(0, 2).toUpperCase() || 'U'}
+              {(user?.email || 'U').slice(0, 2).toUpperCase()}
             </Avatar>
             <Box sx={{ flexGrow: 1, minWidth: 0 }}>
               <Typography variant="subtitle2" sx={{ overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 140 }}>
@@ -214,7 +214,11 @@ function Topbar({ onMenuClick, onProfileClick }: { onMenuClick: () => void; onPr
       fetch(`${API_BASE_URL}/notifications`, {
         headers: { 'Authorization': `Bearer ${token}` }
       })
-      .then(res => res.json())
+      .then(async res => {
+          if (!res.ok) return [];
+          const data = await res.json();
+          return Array.isArray(data) ? data : [];
+      })
       .then(data => setNotifications(data))
       .catch(console.error);
     }
@@ -366,7 +370,7 @@ function Topbar({ onMenuClick, onProfileClick }: { onMenuClick: () => void; onPr
         <Tooltip title="My Profile & Password">
           <IconButton sx={{ ml: 1 }} onClick={onProfileClick}>
             <Avatar sx={{ width: 36, height: 36, bgcolor: 'primary.main', fontSize: 13, fontWeight: 700 }}>
-              {user?.email?.slice(0, 2).toUpperCase() || 'U'}
+              {(user?.email || 'U').slice(0, 2).toUpperCase()}
             </Avatar>
           </IconButton>
         </Tooltip>
